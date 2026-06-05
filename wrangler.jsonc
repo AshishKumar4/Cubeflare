@@ -1,0 +1,96 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cubeflare",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/internal/*", "/map/*", "/install.sh", "/downloads/*"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "PUBLIC_BASE_HOST": "minecraft.ashishkumarsingh.com",
+    "PREVIEW_HOSTNAME": "preview.minecraft.ashishkumarsingh.com",
+    "PREVIEW_DNS_READY": "false",
+    "SANDBOX_TRANSPORT": "rpc",
+    "BACKUP_INTERVAL_SECONDS": "300",
+    "MAX_BACKUPS_PER_SERVER": "5",
+    "MC_SLEEP_AFTER": "30m",
+    "CONNECTOR_ACTIVITY_TTL_SECONDS": "900",
+    "MC_DEFAULT_MEMORY_MIN": "10G",
+    "MC_DEFAULT_MEMORY_MAX": "10G",
+    "MC_DEFAULT_VERSION": "26.1.2",
+    "CLOUDFLARE_ACCOUNT_ID": "f44999d1ddda7012e9a87729eba250f1",
+    "BACKUP_BUCKET_NAME": "cubeflare-backups"
+  },
+  "r2_buckets": [
+    {
+      "binding": "BACKUP_BUCKET",
+      "bucket_name": "cubeflare-backups"
+    },
+    {
+      "binding": "DYNMAP_BUCKET",
+      "bucket_name": "cubeflare-dynmap"
+    },
+    {
+      "binding": "PLUGIN_BUCKET",
+      "bucket_name": "cubeflare-plugins"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "MinecraftSandbox",
+      "image": "./Dockerfile",
+      "instance_type": "standard-4",
+      "max_instances": 100
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "IDENTITY_REGISTRY",
+        "class_name": "IdentityRegistryDO"
+      },
+      {
+        "name": "USER_DO",
+        "class_name": "UserDO"
+      },
+      {
+        "name": "MINECRAFT_SANDBOX",
+        "class_name": "MinecraftSandbox"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "IdentityRegistryDO",
+        "UserDO",
+        "ServerDO",
+        "MinecraftSandbox"
+      ]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": [
+        "ServerDO"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "minecraft.ashishkumarsingh.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "*.preview.minecraft.ashishkumarsingh.com/*",
+      "zone_name": "ashishkumarsingh.com"
+    }
+  ]
+}

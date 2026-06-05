@@ -1,0 +1,39 @@
+{
+  "name": "cubeflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "yarn@4.9.2",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "deploy": "vite build && wrangler deploy",
+    "release:check": "yarn typecheck && yarn test:unit && yarn build",
+    "typecheck": "tsc --noEmit",
+    "test:lifecycle": "node --test tests/container-lifecycle-contract.test.ts tests/lifecycle-policy.test.ts",
+    "test:unit": "node --test tests/assets-routing-contract.test.ts tests/backup-scope-policy.test.ts tests/backup-transport-contract.test.ts tests/cli-installer-contract.test.ts tests/connector-activity.test.ts tests/connector-auth-boundary.test.ts tests/connector-bridge-buffering-contract.test.ts tests/connector-cli-activity-reporter.test.mjs tests/connector-latency-contract.test.ts tests/connector-progress-contract.test.ts tests/connector-ui-copy-contract.test.ts tests/container-lifecycle-contract.test.ts tests/dynmap-compatibility.test.ts tests/dynmap-diagnostics-contract.test.ts tests/dynmap-sync-contract.test.mjs tests/http-body-limits.test.ts tests/lifecycle-policy.test.ts tests/minecraft-locations.test.ts tests/minecraft-optimization.test.ts tests/network-capabilities.test.ts tests/rcon-timeout.test.ts tests/secrets-config-contract.test.ts tests/server-lifecycle-contract.test.ts tests/release-hygiene-contract.test.ts",
+    "cf-typegen": "wrangler types",
+    "connect": "node bin/cubeflare.mjs connect",
+    "e2e:protocol": "node tests/e2e/minecraft-protocol-smoke.mjs"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "hono": "^4.12.18",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.13.7",
+    "@cloudflare/workers-types": "^4.20260605.1",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0",
+    "wrangler": "^4.76.0"
+  }
+}

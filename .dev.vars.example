@@ -1,0 +1,7 @@
+CUBEFLARE_SECRET="replace-with-at-least-32-random-characters"
+CLOUDFLARE_ACCOUNT_ID="production-account-id"
+BACKUP_BUCKET_NAME="cubeflare-backups"
+R2_ACCESS_KEY_ID="production-r2-s3-access-key-id"
+R2_SECRET_ACCESS_KEY="production-r2-s3-secret-access-key"
+# Optional: required only for R2 jurisdiction-specific buckets.
+# BACKUP_BUCKET_ENDPOINT="https://<account-id>.eu.r2.cloudflarestorage.com"
