@@ -68,7 +68,15 @@
       "new_sqlite_classes": [
         "IdentityRegistryDO",
         "UserDO",
+        // Historical migration only; ServerDO was removed in v2 and is not bound.
+        "ServerDO",
         "MinecraftSandbox"
+      ]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": [
+        "ServerDO"
       ]
     }
   ]
