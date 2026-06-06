@@ -3,6 +3,8 @@ import { mkdir, rename, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+const USER_AGENT = 'Cubeflare/0.1 (https://github.com/AshishKumar4/Cubeflare)';
+
 export async function resolveServerJarUrl(preset, version) {
   if (preset === 'vanilla') {
     const manifest = await fetchJson('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json');
@@ -35,7 +37,7 @@ export async function download(url, destination) {
   const response = await fetch(url, {
     redirect: 'follow',
     headers: {
-      'User-Agent': 'Cubeflare/0.1 (minecraft.ashishkumarsingh.com)'
+      'User-Agent': USER_AGENT
     }
   });
   if (!response.ok || !response.body) {
@@ -49,7 +51,7 @@ export async function fetchJson(url) {
   const response = await fetch(url, {
     redirect: 'follow',
     headers: {
-      'User-Agent': 'Cubeflare/0.1 (minecraft.ashishkumarsingh.com)'
+      'User-Agent': USER_AGENT
     }
   });
   if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
