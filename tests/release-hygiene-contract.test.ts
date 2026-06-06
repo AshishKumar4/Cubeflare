@@ -4,15 +4,26 @@ import { describe, it } from 'node:test';
 
 describe('release hygiene contract', () => {
   it('ships the public-facing project documents needed for a release', () => {
-    for (const path of ['README.md', 'LICENSE', 'SECURITY.md', 'docs/deployment.md']) {
+    for (const path of [
+      'README.md',
+      'LICENSE',
+      'SECURITY.md',
+      'docs/deployment.md',
+      'docs/screenshots/landing.png',
+      'docs/screenshots/dashboard.png'
+    ]) {
       assert.equal(existsSync(path), true, `${path} should exist`);
     }
 
     const readme = readFileSync('README.md', 'utf8');
     assert.match(readme, /Cubeflare/);
+    assert.match(readme, /deploy\.workers\.cloudflare\.com\/button/);
+    assert.match(readme, /https:\/\/deploy\.workers\.cloudflare\.com\/\?url=https:\/\/github\.com\/AshishKumar4\/Cubeflare/);
+    assert.match(readme, /docs\/screenshots\/landing\.png/);
+    assert.match(readme, /docs\/screenshots\/dashboard\.png/);
     assert.match(readme, /Architecture/);
     assert.match(readme, /Requirements/);
-    assert.match(readme, /Quick Start/);
+    assert.match(readme, /Deploy/);
     assert.match(readme, /release:check/);
   });
 

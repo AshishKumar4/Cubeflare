@@ -1,13 +1,37 @@
 # Cubeflare
 
-Cubeflare is a Cloudflare-native Minecraft Java hosting platform. It runs a
-multi-tenant control plane on Cloudflare Workers and Durable Objects, then runs
-one Minecraft server per Cloudflare Container through the Cloudflare Sandbox
-SDK.
+<p align="center">
+  <strong>Cloudflare-native Minecraft Java hosting with persistent worlds, secure local bridge access, R2 backups, and a fleet console.</strong>
+</p>
 
-The platform is designed around ephemeral containers: every server restores the
-latest backup on fresh container start, backs up periodically while bridge
-activity is present, and naturally sleeps when nobody is connected.
+<p align="center">
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/AshishKumar4/Cubeflare">
+    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="docs/deployment.md">Deployment guide</a>
+</p>
+
+Cubeflare runs a multi-tenant Minecraft hosting control plane on Cloudflare
+Workers, Durable Objects, R2, Containers, and the Cloudflare Sandbox SDK. Each
+Minecraft world maps to one `MinecraftSandbox` Durable Object and one Sandbox
+container runtime, so lifecycle, backup, restore, bridge access, and server
+state stay attached to the world instead of a central process.
+
+The platform is built around ephemeral containers. A fresh container restores
+the latest backup before launch, active bridge sessions keep the runtime warm,
+periodic backups retain world state, and idle worlds naturally sleep.
+
+## Screenshots
+
+![Cubeflare landing page](docs/screenshots/landing.png)
+
+![Cubeflare server dashboard](docs/screenshots/dashboard.png)
 
 ## Features
 
@@ -17,33 +41,54 @@ activity is present, and naturally sleeps when nobody is connected.
   Sandbox SDK container runtime.
 - Presets for Vanilla, Paper, Purpur, Folia, Fabric, and custom launch scripts.
 - R2-backed Sandbox SDK backups with retention pruning.
-- Server lifecycle controls: create, start/wake, restart, stop, backup, restore,
-  and delete.
+- Server lifecycle controls: create, start or wake, restart, stop, backup,
+  restore, and delete.
 - Secure CLI bridge for Minecraft Java TCP traffic.
-- Owner console for logs, terminal, files, plugins, backups, settings, player
-  activity, and Dynmap mirror status.
-- Dynmap mirroring to R2 for supported server/plugin combinations.
+- Owner console for logs, RCON, terminal, files, plugins, backups, settings,
+  player activity, and Dynmap mirror status.
+- Dynmap mirroring to R2 for supported server and plugin combinations.
+- High-fidelity Paper defaults: Java 25, tuned G1 flags, 10G heap profile,
+  12 chunk view distance, and 10 chunk simulation distance.
+
+## Deploy
+
+Use the button above to create a Cloudflare deployment from this repository.
+After the Worker project is created, finish the account-specific setup in
+[docs/deployment.md](docs/deployment.md): custom domain, R2 buckets, Worker
+secrets, and the Sandbox SDK R2 credentials used for direct container-to-R2
+backup transfer.
+
+Manual deploy:
+
+```sh
+corepack enable
+yarn install
+cp .dev.vars.example .dev.vars
+yarn release:check
+yarn deploy
+```
 
 ## Architecture
 
 ```text
-Browser / CLI
+Browser / Cubeflare CLI
     |
     v
-Cloudflare Worker + Hono + Assets
+Cloudflare Worker + Hono + Static Assets
     |
-    +-- IdentityRegistryDO: global email, CLI auth, invite code registry
+    +-- IdentityRegistryDO: email registry, CLI auth, invite code registry
     +-- UserDO: profile, sessions, server summaries
-    +-- MinecraftSandbox DO: one Minecraft server and one Sandbox container
+    +-- MinecraftSandbox DO: one Minecraft world and one Sandbox container
             |
             +-- Cloudflare Container: Java server, bridge, Dynmap sync
             +-- R2: backups, plugin uploads, Dynmap mirror
 ```
 
-Minecraft Java uses TCP, while Workers expose HTTP/WebSocket request handling.
-Players connect through `cubeflare connect`, which opens a local TCP listener
-and bridges Minecraft traffic to the server container over an authenticated
-WebSocket path.
+Minecraft Java uses TCP, while Workers expose HTTP and WebSocket request
+handling. Players run `cubeflare connect`, which opens a local TCP listener and
+bridges Minecraft traffic to the server container over an authenticated
+WebSocket path. The CLI chooses an available local port and prints the
+Minecraft address to join.
 
 ## Requirements
 
@@ -52,23 +97,6 @@ WebSocket path.
 - Node.js 20 or newer.
 - Yarn 4 through Corepack.
 - Docker for local container image builds during deployment.
-
-## Quick Start
-
-```sh
-corepack enable
-yarn install
-cp .dev.vars.example .dev.vars
-```
-
-Create the required R2 buckets and Worker secrets, then deploy:
-
-```sh
-yarn release:check
-yarn deploy
-```
-
-See [docs/deployment.md](docs/deployment.md) for the full deployment checklist.
 
 ## CLI
 
@@ -92,8 +120,7 @@ Or connect with a server invite code:
 cubeflare connect CF-SURVIVAL-WORLD-....
 ```
 
-The CLI chooses an available local port and prints the Minecraft address to
-join. Keep the CLI process open while players are connected.
+Keep the CLI process open while players are connected.
 
 ## Development
 
