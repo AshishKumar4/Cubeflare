@@ -10,6 +10,7 @@ import {
   shouldRenewContainerActivity,
 } from "../minecraft/lifecycle-policy";
 import { executeRcon, parseListResponse } from "../minecraft/rcon";
+import { internalBaseUrlForManifest, publicJoinHost } from "../hosts";
 import { normalizeManifestCompatibility, patchManifest } from "../minecraft/presets";
 import {
   summarizeConnectorActivitySessions,
@@ -960,7 +961,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
               CUBEFLARE_SERVER_ID: manifest.serverId,
               CUBEFLARE_BRIDGE_SECRET: bridgeSecret,
               CUBEFLARE_DYNMAP_SYNC_SECRET: dynmapSecret,
-              CUBEFLARE_INTERNAL_BASE_URL: `https://${this.env.PUBLIC_BASE_HOST}`,
+              CUBEFLARE_INTERNAL_BASE_URL: internalBaseUrlForManifest(this.env, manifest),
               CUBEFLARE_BRIDGE_PORT: String(BRIDGE_PORT),
               CUBEFLARE_MINECRAFT_HOST: "127.0.0.1",
               CUBEFLARE_MINECRAFT_PORT: String(MINECRAFT_PORT),
@@ -1780,10 +1781,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
   }
 
   private joinHost(manifest: MinecraftServerManifest): string {
-    return (
-      manifest.network.joinHost ??
-      `${manifest.serverId}.${this.env.PUBLIC_BASE_HOST}`
-    );
+    return publicJoinHost(this.env, manifest);
   }
 
   private containerState(): ContainerStateWithTcp {

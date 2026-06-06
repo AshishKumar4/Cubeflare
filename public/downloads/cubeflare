@@ -8,7 +8,7 @@ import path from 'node:path';
 import tls from 'node:tls';
 import { pathToFileURL } from 'node:url';
 
-const DEFAULT_ORIGIN = process.env.CUBEFLARE_DEFAULT_ORIGIN || 'https://minecraft.ashishkumarsingh.com';
+const DEFAULT_ORIGIN = process.env.CUBEFLARE_DEFAULT_ORIGIN || '';
 const CONFIG_DIR = process.env.CUBEFLARE_HOME || path.join(os.homedir(), '.cubeflare');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const MAX_BUFFERED_BYTES = 1024 * 1024;
@@ -30,6 +30,10 @@ const color = {
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+  runCli();
+}
+
+export function runCli() {
   main().catch((error) => {
     console.error(color.red(`Error: ${errorMessage(error)}`));
     process.exit(error instanceof CliError ? error.exitCode : 1);
@@ -83,7 +87,7 @@ async function commandAuth(argv) {
     return;
   }
 
-  const origin = normalizeOrigin(args.origin || DEFAULT_ORIGIN);
+  const origin = resolveOrigin(args.origin || DEFAULT_ORIGIN);
   const deviceName = args['device-name'] || `${os.hostname()} terminal`;
   printTitle('Cubeflare Auth');
 
@@ -163,7 +167,7 @@ async function commandConnect(argv) {
   const positionalIsInvite = isConnectorInviteCode(positional);
   const inviteMode = positionalIsInvite || Boolean(args.code);
   const config = inviteMode ? null : await requireConfig();
-  const origin = normalizeOrigin(args.origin || config?.origin || DEFAULT_ORIGIN);
+  const origin = resolveOrigin(args.origin || config?.origin || DEFAULT_ORIGIN);
   const listenHost = String(args.host || process.env.CUBEFLARE_LISTEN_HOST || '127.0.0.1').trim();
 
   let inviteCode = String(args.code || (inviteMode ? positional : '')).trim();
@@ -282,7 +286,7 @@ async function commandServers(argv) {
     return;
   }
   const config = await requireConfig();
-  const origin = normalizeOrigin(args.origin || config.origin || DEFAULT_ORIGIN);
+  const origin = resolveOrigin(args.origin || config.origin || DEFAULT_ORIGIN);
   const subcommand = String(args._[0] || '').toLowerCase();
   if (subcommand === 'start' || subcommand === 'wake') {
     const serverRef = args._.slice(1).join(' ').trim();
@@ -358,7 +362,7 @@ async function commandWhoami(argv) {
     return;
   }
   const config = await requireConfig();
-  const origin = normalizeOrigin(args.origin || config.origin || DEFAULT_ORIGIN);
+  const origin = resolveOrigin(args.origin || config.origin || DEFAULT_ORIGIN);
   const response = await apiJson(origin, '/api/cli/me', {
     token: config.token
   });
@@ -381,7 +385,7 @@ async function commandLogout(argv) {
   }
   const config = await readConfig();
   if (config?.token && !args.local) {
-    const origin = normalizeOrigin(args.origin || config.origin || DEFAULT_ORIGIN);
+    const origin = resolveOrigin(args.origin || config.origin || DEFAULT_ORIGIN);
     await apiJson(origin, '/api/cli/logout', {
       method: 'POST',
       token: config.token,
@@ -866,8 +870,21 @@ function normalizeConnectorInviteCode(value) {
   return `CF-${prefix}-${groups.join('-')}`;
 }
 
+function resolveOrigin(value) {
+  const origin = String(value || '').trim();
+  if (!origin) {
+    throw new CliError('Missing Cubeflare origin. Install the CLI from your Cubeflare deployment, pass --origin <url>, or set CUBEFLARE_DEFAULT_ORIGIN.');
+  }
+  return normalizeOrigin(origin);
+}
+
 function normalizeOrigin(value) {
-  const url = new URL(value);
+  let url;
+  try {
+    url = new URL(String(value || '').trim());
+  } catch {
+    throw new CliError('--origin must be an HTTP(S) URL');
+  }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new CliError('--origin must be an HTTP(S) URL');
   }

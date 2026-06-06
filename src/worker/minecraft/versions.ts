@@ -142,7 +142,7 @@ async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     headers: {
       Accept: 'application/json',
-      'User-Agent': 'Cubeflare/0.1 (minecraft.ashishkumarsingh.com)'
+      'User-Agent': 'Cubeflare/0.1 (https://github.com/AshishKumar4/Cubeflare)'
     }
   });
   if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);

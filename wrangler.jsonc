@@ -14,8 +14,6 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "PUBLIC_BASE_HOST": "minecraft.ashishkumarsingh.com",
-    "PREVIEW_HOSTNAME": "preview.minecraft.ashishkumarsingh.com",
     "PREVIEW_DNS_READY": "false",
     "SANDBOX_TRANSPORT": "rpc",
     "BACKUP_INTERVAL_SECONDS": "300",
@@ -24,9 +22,7 @@
     "CONNECTOR_ACTIVITY_TTL_SECONDS": "900",
     "MC_DEFAULT_MEMORY_MIN": "10G",
     "MC_DEFAULT_MEMORY_MAX": "10G",
-    "MC_DEFAULT_VERSION": "26.1.2",
-    "CLOUDFLARE_ACCOUNT_ID": "f44999d1ddda7012e9a87729eba250f1",
-    "BACKUP_BUCKET_NAME": "cubeflare-backups"
+    "MC_DEFAULT_VERSION": "26.1.2"
   },
   "r2_buckets": [
     {
@@ -72,25 +68,8 @@
       "new_sqlite_classes": [
         "IdentityRegistryDO",
         "UserDO",
-        "ServerDO",
         "MinecraftSandbox"
       ]
-    },
-    {
-      "tag": "v2",
-      "deleted_classes": [
-        "ServerDO"
-      ]
-    }
-  ],
-  "routes": [
-    {
-      "pattern": "minecraft.ashishkumarsingh.com",
-      "custom_domain": true
-    },
-    {
-      "pattern": "*.preview.minecraft.ashishkumarsingh.com/*",
-      "zone_name": "ashishkumarsingh.com"
     }
   ]
 }

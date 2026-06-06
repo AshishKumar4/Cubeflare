@@ -14,6 +14,7 @@ import { randomBase64Url, hmacSha256Hex, sha256Hex, timingSafeEqual } from './cr
 import { IdentityRegistryDO } from './durable/identity';
 import { UserDO } from './durable/user';
 import { dynmapSecurityHeaders, HttpError, isSafeOrigin, parseJson, problem, strictSecurityHeaders } from './http';
+import { configuredPreviewHostname, publicBaseHostForRequest, publicJoinHost } from './hosts';
 import { createServerId } from './minecraft/ids';
 import { BUILTIN_PLUGINS, buildManifest, normalizeInviteConfig } from './minecraft/presets';
 import { DEFAULT_MINECRAFT_VERSION, getVersionCatalog } from './minecraft/versions';
@@ -167,7 +168,7 @@ app.post('/api/servers', requireAuth(), async (c) => {
       version: c.env.MC_DEFAULT_VERSION ?? DEFAULT_MINECRAFT_VERSION,
       memoryMin: c.env.MC_DEFAULT_MEMORY_MIN ?? DEFAULT_MEMORY_MIN,
       memoryMax: c.env.MC_DEFAULT_MEMORY_MAX ?? DEFAULT_MEMORY_MAX,
-      baseHost: c.env.PUBLIC_BASE_HOST
+      baseHost: publicBaseHostForRequest(c.env, c.req.raw)
     }
   });
   const requestLocation = requestLocationObservation(c.req.raw);
@@ -442,12 +443,13 @@ app.post('/api/servers/:serverId/plugins/upload', requireAuth(), async (c) => {
 app.get('/api/servers/:serverId/dynmap', requireAuth(), async (c) => {
   const manifest = await authorizedManifest(c.env, c.req.param('serverId'), c.get('user').userId);
   const includePreview = c.req.query('preview') === '1' || c.req.query('preview') === 'true';
-  const previewDnsReady = c.env.PREVIEW_DNS_READY === 'true';
+  const previewHostname = configuredPreviewHostname(c.env);
+  const previewDnsReady = c.env.PREVIEW_DNS_READY === 'true' && Boolean(previewHostname);
   let preview: { url: string } | null = null;
   let previewError: string | undefined;
-  if (includePreview && previewDnsReady) {
+  if (includePreview && previewHostname && c.env.PREVIEW_DNS_READY === 'true') {
     preview = await (await minecraftSandbox(c.env, manifest))
-      .getDynmapPreview(c.env.PREVIEW_HOSTNAME)
+      .getDynmapPreview(previewHostname)
       .catch((error) => {
         previewError = error instanceof Error ? error.message : String(error);
         return null;
@@ -468,15 +470,15 @@ app.get('/api/servers/:serverId/dynmap', requireAuth(), async (c) => {
     preview,
     previewError,
     previewDnsReady,
-    previewHostname: c.env.PREVIEW_HOSTNAME,
-    previewDnsRecord: `*.${c.env.PREVIEW_HOSTNAME}`,
     r2Path: `/map/${manifest.serverId}/`,
     enabled,
     compatible: dynmapCompatibility.compatible,
     message: dynmapCompatibility.message,
     mirrored: enabled && Boolean(mirroredIndex),
     tilesAvailable,
-    available: enabled && Boolean(mirroredIndex) && tilesAvailable
+    available: enabled && Boolean(mirroredIndex) && tilesAvailable,
+    previewHostname: previewHostname ?? null,
+    previewDnsRecord: previewHostname ? `*.${previewHostname}` : null
   });
 });
 
@@ -588,12 +590,12 @@ export default {
 } satisfies ExportedHandler<AppEnv>;
 
 async function authorizedServer(env: AppEnv, serverId: string, userId: string) {
-  const stub = await minecraftSandboxById(env, serverId);
-  const ownerId = await stub.getOwnerId();
+  const server = await minecraftSandboxById(env, serverId);
+  const ownerId = await server.getOwnerId();
   if (!ownerId || ownerId !== userId) {
     throw new HttpError(404, 'server_not_found', 'Server not found');
   }
-  return stub;
+  return server;
 }
 
 async function authorizedManifest(
@@ -772,7 +774,7 @@ async function createConnectorInviteForUser(
     expiresAt: null,
     localAddress: LOCAL_CONNECT_ADDRESS,
     installCommand: buildInstallCommand(origin),
-    command: buildConnectorCommand(env, origin, inviteCode)
+    command: buildConnectorCommand(inviteCode)
   };
 }
 
@@ -947,14 +949,8 @@ function requestLocationObservation(request: Request): RuntimeLocationObservatio
   };
 }
 
-function publicJoinHost(env: AppEnv, manifest: MinecraftServerManifest): string {
-  return manifest.network.joinHost || `${manifest.serverId}.${env.PUBLIC_BASE_HOST}`;
-}
-
-function buildConnectorCommand(env: AppEnv, origin: string, inviteCode: string): string {
-  const defaultOrigin = `https://${env.PUBLIC_BASE_HOST}`;
-  const originPart = origin === defaultOrigin ? [] : ['--origin', shellArg(origin)];
-  return ['cubeflare', 'connect', ...originPart, shellArg(inviteCode)].join(' ');
+function buildConnectorCommand(inviteCode: string): string {
+  return ['cubeflare', 'connect', shellArg(inviteCode)].join(' ');
 }
 
 function buildInstallCommand(origin: string): string {
@@ -1137,14 +1133,14 @@ async function serveTextAsset(
 
 function rewriteInstallScript(source: string, origin: string): string {
   return source.replace(
-    /BASE_URL="\$\{CUBEFLARE_INSTALL_BASE_URL:-[^}]+}"/,
+    /BASE_URL="\$\{CUBEFLARE_INSTALL_BASE_URL:-[^}]*}"/,
     () => `BASE_URL="\${CUBEFLARE_INSTALL_BASE_URL:-${origin}}"`
   );
 }
 
 function rewriteCliDownload(source: string, origin: string): string {
   return source.replace(
-    /const DEFAULT_ORIGIN = process\.env\.CUBEFLARE_DEFAULT_ORIGIN \|\| '[^']+';/,
+    /const DEFAULT_ORIGIN = process\.env\.CUBEFLARE_DEFAULT_ORIGIN \|\| '[^']*';/,
     () => `const DEFAULT_ORIGIN = process.env.CUBEFLARE_DEFAULT_ORIGIN || '${origin}';`
   );
 }
@@ -1451,11 +1447,8 @@ async function handleConnectorSession(
     sessionId: connectorSessionId,
     ttlSeconds: CONNECTOR_ACTIVITY_TOKEN_TTL_SECONDS
   });
-  const endpoint = await server.getBridgeEndpoint(
-    env.PUBLIC_BASE_HOST,
-    bridge.token,
-    env.PUBLIC_BASE_HOST
-  );
+  const publicBaseHost = publicBaseHostForRequest(env, request);
+  const endpoint = await server.getBridgeEndpoint(publicBaseHost, bridge.token, publicBaseHost);
   return {
     serverId: manifest.serverId,
     host,

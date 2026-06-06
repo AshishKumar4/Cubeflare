@@ -54,9 +54,9 @@ periodic backups retain world state, and idle worlds naturally sleep.
 
 Use the button above to create a Cloudflare deployment from this repository.
 After the Worker project is created, finish the account-specific setup in
-[docs/deployment.md](docs/deployment.md): custom domain, R2 buckets, Worker
-secrets, and the Sandbox SDK R2 credentials used for direct container-to-R2
-backup transfer.
+[docs/deployment.md](docs/deployment.md): R2 buckets, Worker secrets, and the
+Sandbox SDK R2 credentials used for direct container-to-R2 backup transfer. A
+workers.dev hostname works by default; a custom domain is optional.
 
 Manual deploy:
 
@@ -93,7 +93,7 @@ Minecraft address to join.
 ## Requirements
 
 - Cloudflare account with Workers, Durable Objects, R2, and Containers enabled.
-- A custom domain routed through Cloudflare.
+- Optional: a custom domain routed through Cloudflare.
 - Node.js 20 or newer.
 - Yarn 4 through Corepack.
 - Docker for local container image builds during deployment.
@@ -103,7 +103,7 @@ Minecraft address to join.
 Install from your deployed Cubeflare origin:
 
 ```sh
-curl -fsSL https://your-cubeflare-domain.example/install.sh | sh
+curl -fsSL https://your-cubeflare-worker.workers.dev/install.sh | sh
 ```
 
 Use an account login:

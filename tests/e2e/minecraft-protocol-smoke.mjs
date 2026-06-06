@@ -3,7 +3,7 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
-const BASE = env('BASE', 'https://minecraft.ashishkumarsingh.com').replace(/\/$/, '');
+const BASE = env('BASE', 'http://127.0.0.1:8787').replace(/\/$/, '');
 const ORIGIN = new URL(BASE).origin;
 const PASSWORD = `Cubeflare-e2e-${Date.now()}-password`;
 const EMAIL = env('CUBEFLARE_E2E_EMAIL', `e2e-${Date.now()}-${Math.random().toString(16).slice(2)}@cubeflare.test`);

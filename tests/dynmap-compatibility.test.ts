@@ -23,7 +23,7 @@ describe('Dynmap compatibility', () => {
     assert.match(presets, /plugin\.source\.id === 'dynmap' && !includeBuiltinDynmap/);
   });
 
-  it('normalizes legacy manifests before runtime launch', () => {
+  it('normalizes existing manifests before runtime launch', () => {
     const presets = readFileSync('src/worker/minecraft/presets.ts', 'utf8');
     const sandbox = readFileSync('src/worker/sandbox/MinecraftSandbox.ts', 'utf8');
 

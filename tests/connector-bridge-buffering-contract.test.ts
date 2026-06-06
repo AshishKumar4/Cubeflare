@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 
 describe('connector websocket bridge buffering contract', () => {
   it('drains websocket frames left over from the HTTP upgrade response', () => {
-    const source = readFileSync('bin/cubeflare.mjs', 'utf8');
+    const source = readFileSync('public/downloads/cubeflare', 'utf8');
     const start = source.indexOf('async function connectWebSocket');
     const end = source.indexOf('function writeClientFrame');
     assert.notEqual(start, -1);

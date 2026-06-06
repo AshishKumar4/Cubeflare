@@ -76,7 +76,7 @@ describe('connector auth boundary', () => {
   });
 
   it('allows anonymous CLI invite codes without loading account config', () => {
-    const cli = readFileSync('bin/cubeflare.mjs', 'utf8');
+    const cli = readFileSync('public/downloads/cubeflare', 'utf8');
     const commandStart = cli.indexOf('async function commandConnect');
     const commandEnd = cli.indexOf('async function commandServers');
     assert.notEqual(commandStart, -1);
@@ -91,7 +91,7 @@ describe('connector auth boundary', () => {
   });
 
   it('exposes invite prefix and rotation through the signed-in CLI management path', () => {
-    const cli = readFileSync('bin/cubeflare.mjs', 'utf8');
+    const cli = readFileSync('public/downloads/cubeflare', 'utf8');
     const worker = readFileSync('src/worker/index.ts', 'utf8');
 
     assert.match(cli, /subcommand === 'invite'/);

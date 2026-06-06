@@ -135,6 +135,7 @@ export function buildManifest(input: {
     },
     network: {
       mode: 'bridge',
+      publicBaseHost: input.defaults.baseHost,
       joinHost: `${input.serverId}.${input.defaults.baseHost}`
     },
     invite: {
@@ -291,7 +292,7 @@ function optimizedServerProperties(): Record<string, string | number | boolean> 
 export function normalizeInviteConfig(manifest: MinecraftServerManifest): MinecraftServerManifest['invite'] {
   const existing = manifest.invite;
   const prefix = cleanInvitePrefix(existing?.prefix ?? manifest.name ?? manifest.serverId);
-  const rotation = existing?.rotation || `legacy-${manifest.serverId}`;
+  const rotation = existing?.rotation || randomBase64Url(12);
   const updatedAt = existing?.updatedAt || manifest.updatedAt || manifest.createdAt;
   if (existing && existing.prefix === prefix && existing.rotation === rotation && existing.updatedAt === updatedAt) {
     return existing;

@@ -37,6 +37,10 @@ describe('Cubeflare secret configuration contract', () => {
     assert.match(envExample, /BACKUP_BUCKET_ENDPOINT/);
     assert.doesNotMatch(envExample, /AUTH_PEPPER|INTERNAL_SHARED_SECRET|GATEWAY_SHARED_SECRET/);
     assert.doesNotMatch(envExample, /CUBEFLARE_WORKER_ORIGIN|^PORT=/m);
+    assert.doesNotMatch(envExample, /replace-with|production-|ashishkumarsingh|minecraft\.ashish/);
+    assert.match(envExample, /^CUBEFLARE_SECRET=$/m);
+    assert.match(envExample, /^R2_ACCESS_KEY_ID=$/m);
+    assert.match(envExample, /^R2_SECRET_ACCESS_KEY=$/m);
     assert.match(backupContract, /Sandbox SDK production transport/);
   });
 

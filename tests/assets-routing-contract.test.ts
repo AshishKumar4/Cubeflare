@@ -17,6 +17,17 @@ describe('Workers Assets routing contract', () => {
     assert.equal(config.assets?.not_found_handling, 'single-page-application');
   });
 
+  it('keeps the public deploy template free of account-specific routes and domains', () => {
+    const config = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
+    const serialized = JSON.stringify(config);
+
+    assert.equal(config.routes, undefined);
+    assert.doesNotMatch(serialized, /ashishkumarsingh|minecraft\.ashish|f44999d1/);
+    assert.equal(config.vars?.PUBLIC_BASE_HOST, undefined);
+    assert.equal(config.vars?.PREVIEW_HOSTNAME, undefined);
+    assert.equal(config.vars?.CLOUDFLARE_ACCOUNT_ID, undefined);
+  });
+
   it('serves installer assets through the Worker so self-hosted deployments inject their own origin', () => {
     const source = readFileSync('src/worker/index.ts', 'utf8');
 

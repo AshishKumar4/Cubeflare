@@ -14,8 +14,8 @@ export type AppEnv = {
   USER_DO: DurableObjectNamespace<UserDO>;
   MINECRAFT_SANDBOX: DurableObjectNamespace<MinecraftSandbox>;
   CUBEFLARE_SECRET?: string;
-  PUBLIC_BASE_HOST: string;
-  PREVIEW_HOSTNAME: string;
+  PUBLIC_BASE_HOST?: string;
+  PREVIEW_HOSTNAME?: string;
   PREVIEW_DNS_READY?: string;
   SANDBOX_TRANSPORT?: 'http' | 'websocket' | 'rpc';
   BACKUP_INTERVAL_SECONDS?: string;
@@ -118,6 +118,7 @@ export type MinecraftServerManifest = {
   serverProperties: Record<string, string | number | boolean>;
   network: {
     mode: NetworkMode;
+    publicBaseHost?: string;
     joinHost?: string;
   };
   invite: {

@@ -43,6 +43,31 @@ describe('release hygiene contract', () => {
       assert.match(gitignore, new RegExp(escapeRegExp(pattern)));
     }
   });
+
+  it('centralizes public host normalization instead of duplicating hostname fallbacks', () => {
+    const hosts = readFileSync('src/worker/hosts.ts', 'utf8');
+    const worker = readFileSync('src/worker/index.ts', 'utf8');
+    const sandbox = readFileSync('src/worker/sandbox/MinecraftSandbox.ts', 'utf8');
+
+    assert.match(hosts, /publicBaseHostForRequest/);
+    assert.match(hosts, /publicBaseHostForManifest/);
+    assert.match(hosts, /publicJoinHost/);
+    assert.match(hosts, /internalBaseUrlForManifest/);
+    assert.match(worker, /from '\.\/hosts'/);
+    assert.match(sandbox, /from "\.\.\/hosts"/);
+    assert.equal((worker.match(/function cleanHostValue/g) ?? []).length, 0);
+    assert.equal((sandbox.match(/function cleanHostValue/g) ?? []).length, 0);
+  });
+
+  it('keeps the local CLI entrypoint as a wrapper around the downloadable CLI source', () => {
+    const bin = readFileSync('bin/cubeflare.mjs', 'utf8');
+    const download = readFileSync('public/downloads/cubeflare', 'utf8');
+
+    assert.match(bin, /from '\.\.\/public\/downloads\/cubeflare'/);
+    assert.match(bin, /runCli\(\)/);
+    assert.match(download, /export function runCli/);
+    assert.doesNotMatch(bin, /async function commandConnect|async function commandAuth/);
+  });
 });
 
 function escapeRegExp(value: string): string {

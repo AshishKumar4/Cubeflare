@@ -6,7 +6,9 @@ CLI named `cubeflare`.
 
 ## Current Architecture
 
-- The public app is served from `minecraft.ashishkumarsingh.com`.
+- The public app runs on the deployment's current Worker origin by default,
+  including workers.dev. Operators may configure a custom domain through
+  `PUBLIC_BASE_HOST`.
 - Account, session, and CLI auth state live in SQLite-backed Durable Objects.
 - Each Minecraft server maps one-to-one to a `MinecraftSandbox` Durable Object
   and one Sandbox SDK container runtime.
@@ -72,8 +74,9 @@ credentials for presigned container-to-R2 transfer:
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 
-`CLOUDFLARE_ACCOUNT_ID` and `BACKUP_BUCKET_NAME` identify the backup bucket.
-`BACKUP_BUCKET_ENDPOINT` is only needed for jurisdiction-specific R2 buckets.
+`CLOUDFLARE_ACCOUNT_ID` or `CLOUDFLARE_R2_ACCOUNT_ID`, plus
+`BACKUP_BUCKET_NAME`, identify the backup bucket. `BACKUP_BUCKET_ENDPOINT` is
+only needed for jurisdiction-specific R2 buckets.
 
 ## Backup Contract
 
@@ -101,8 +104,8 @@ corepack yarn wrangler deploy
 After deploy, verify:
 
 ```sh
-curl -fsS https://minecraft.ashishkumarsingh.com/api/health
-curl -fsSL https://minecraft.ashishkumarsingh.com/install.sh | sh
+curl -fsS https://your-worker.workers.dev/api/health
+curl -fsSL https://your-worker.workers.dev/install.sh | sh
 cubeflare help
 cubeflare connect --help
 ```

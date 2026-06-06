@@ -17,7 +17,7 @@ describe('connector progress contract', () => {
   });
 
   it('polls connector progress while preparing the bridge session', () => {
-    const source = readFileSync('bin/cubeflare.mjs', 'utf8');
+    const source = readFileSync('public/downloads/cubeflare', 'utf8');
     const start = source.indexOf('async function prepareBridgeSession');
     const end = source.indexOf('function createActivityReporter');
     assert.notEqual(start, -1);

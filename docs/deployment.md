@@ -1,6 +1,7 @@
 # Deployment
 
-This guide deploys Cubeflare to a Cloudflare account and custom domain.
+This guide deploys Cubeflare to a Cloudflare account. A workers.dev hostname
+works by default; custom domains and sandbox preview DNS are optional.
 
 ## 1. Prerequisites
 
@@ -8,8 +9,7 @@ This guide deploys Cubeflare to a Cloudflare account and custom domain.
 - Docker running locally.
 - Node.js 20 or newer.
 - Corepack enabled.
-- A Cloudflare-routed domain for the control plane, for example
-  `minecraft.example.com`.
+- Optional: a Cloudflare-routed domain for the control plane.
 
 ## 2. Install Dependencies
 
@@ -30,17 +30,22 @@ Use different bucket names if you prefer, then update `wrangler.jsonc`.
 
 ## 4. Configure `wrangler.jsonc`
 
-Set these values for your deployment:
+The checked-in `wrangler.jsonc` is intentionally account-neutral. It has no
+custom routes and no account IDs, so one-click deploys can start on workers.dev.
 
-- `PUBLIC_BASE_HOST`: the public control-plane hostname.
-- `PREVIEW_HOSTNAME`: the wildcard preview hostname for Sandbox previews.
-- Route patterns under `routes`.
-- R2 bucket names.
-- `CLOUDFLARE_ACCOUNT_ID`.
-- `BACKUP_BUCKET_NAME`.
+Set these only when they apply to your deployment:
+
+- R2 bucket names if you changed them from the defaults.
+- `PUBLIC_BASE_HOST` if you want generated server manifests to prefer a custom
+  control-plane hostname instead of the current request host.
+- `PREVIEW_HOSTNAME` and route/DNS entries only if you want live Sandbox preview
+  URLs in addition to the mirrored `/map/<server>/` route.
 
 `PREVIEW_DNS_READY` can stay `false` unless you configure the wildcard preview
 DNS record.
+
+For a custom domain, add routes with your own zone and hostname, then set
+`PUBLIC_BASE_HOST` to that hostname.
 
 ## 5. Configure Secrets
 
@@ -54,9 +59,14 @@ The current Cloudflare Sandbox SDK backup and restore APIs still need direct R2
 S3 credentials for presigned container-to-R2 transfer:
 
 ```sh
+yarn wrangler secret put CLOUDFLARE_ACCOUNT_ID
+yarn wrangler secret put BACKUP_BUCKET_NAME
 yarn wrangler secret put R2_ACCESS_KEY_ID
 yarn wrangler secret put R2_SECRET_ACCESS_KEY
 ```
+
+`CLOUDFLARE_R2_ACCOUNT_ID` may be used instead of `CLOUDFLARE_ACCOUNT_ID` if the
+backup bucket belongs to a different account.
 
 If your backup bucket is in an R2 jurisdiction, add the endpoint in
 `.dev.vars` for local development and as a Worker variable for production:
@@ -84,8 +94,8 @@ container application.
 ## 8. Smoke Test
 
 ```sh
-curl -fsS https://your-cubeflare-domain.example/api/health
-curl -fsSL https://your-cubeflare-domain.example/install.sh | sh
+curl -fsS https://your-worker.workers.dev/api/health
+curl -fsSL https://your-worker.workers.dev/install.sh | sh
 cubeflare help
 cubeflare connect --help
 ```
@@ -96,7 +106,7 @@ and connect with the CLI.
 For a deeper smoke test:
 
 ```sh
-BASE=https://your-cubeflare-domain.example yarn e2e:protocol
+BASE=https://your-worker.workers.dev yarn e2e:protocol
 ```
 
 Run the E2E only against a deployment where test accounts and servers can be

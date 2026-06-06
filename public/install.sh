@@ -1,9 +1,15 @@
 #!/bin/sh
 set -eu
 
-BASE_URL="${CUBEFLARE_INSTALL_BASE_URL:-https://minecraft.ashishkumarsingh.com}"
+BASE_URL="${CUBEFLARE_INSTALL_BASE_URL:-}"
 EXPLICIT_INSTALL_DIR=""
 PROFILE_UPDATED=""
+
+if [ -z "$BASE_URL" ]; then
+  echo "Set CUBEFLARE_INSTALL_BASE_URL to your deployed Cubeflare origin." >&2
+  echo "Example: CUBEFLARE_INSTALL_BASE_URL=https://your-worker.workers.dev sh public/install.sh" >&2
+  exit 1
+fi
 
 if [ -n "${CUBEFLARE_INSTALL_DIR:-}" ]; then
   EXPLICIT_INSTALL_DIR="1"
