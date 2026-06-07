@@ -2,14 +2,9 @@
 set -eu
 
 BASE_URL="${CUBEFLARE_INSTALL_BASE_URL:-}"
+CLI_DOWNLOAD_URL="${CUBEFLARE_CLI_DOWNLOAD_URL:-https://raw.githubusercontent.com/AshishKumar4/Cubeflare/main/public/downloads/cubeflare}"
 EXPLICIT_INSTALL_DIR=""
 PROFILE_UPDATED=""
-
-if [ -z "$BASE_URL" ]; then
-  echo "Set CUBEFLARE_INSTALL_BASE_URL to your deployed Cubeflare origin." >&2
-  echo "Example: CUBEFLARE_INSTALL_BASE_URL=https://your-worker.workers.dev sh public/install.sh" >&2
-  exit 1
-fi
 
 if [ -n "${CUBEFLARE_INSTALL_DIR:-}" ]; then
   EXPLICIT_INSTALL_DIR="1"
@@ -134,7 +129,13 @@ TMP_FILE="$(mktemp)"
 TMP_WRAPPER="$(mktemp)"
 trap 'rm -f "$TMP_FILE" "$TMP_WRAPPER"' EXIT
 
-curl -fsSL "$BASE_URL/downloads/cubeflare" -o "$TMP_FILE"
+if [ -n "$BASE_URL" ]; then
+  DOWNLOAD_URL="$BASE_URL/downloads/cubeflare"
+else
+  DOWNLOAD_URL="$CLI_DOWNLOAD_URL"
+fi
+
+curl -fsSL "$DOWNLOAD_URL" -o "$TMP_FILE"
 chmod 0644 "$TMP_FILE"
 mv "$TMP_FILE" "$MODULE"
 {
@@ -160,8 +161,18 @@ fi
 echo ""
 echo "Next:"
 if path_has_dir "$INSTALL_DIR"; then
-  echo "  cubeflare auth"
+  if [ -n "$BASE_URL" ]; then
+    echo "  cubeflare auth"
+  else
+    echo "  cubeflare deploy"
+  fi
 else
-  echo "  $BIN auth"
+  if [ -n "$BASE_URL" ]; then
+    echo "  $BIN auth"
+  else
+    echo "  $BIN deploy"
+  fi
 fi
-echo "  cubeflare connect <server name>"
+if [ -n "$BASE_URL" ]; then
+  echo "  cubeflare connect <server name>"
+fi

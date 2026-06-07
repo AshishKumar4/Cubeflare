@@ -1,7 +1,13 @@
 # Deployment
 
-This guide deploys Cubeflare to a Cloudflare account. A workers.dev hostname
-works by default; custom domains and sandbox preview DNS are optional.
+Cubeflare is deployed through the `cubeflare deploy` wizard. It uses Wrangler's
+Cloudflare login, creates the R2 buckets, writes Worker secrets through a
+temporary secrets file, builds the Worker and Minecraft container image, deploys
+with an immediate container rollout, and smoke-tests the deployed `/api/health`
+endpoint.
+
+A workers.dev hostname works by default. Custom domains and sandbox preview DNS
+are optional.
 
 ## 1. Prerequisites
 
@@ -11,24 +17,57 @@ works by default; custom domains and sandbox preview DNS are optional.
 - Corepack enabled.
 - Optional: a Cloudflare-routed domain for the control plane.
 
-## 2. Install Dependencies
+## 2. Install The CLI
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AshishKumar4/Cubeflare/main/public/install.sh | sh
+cubeflare deploy
+```
+
+If you cloned the repository already, you can run the same wizard from the repo:
 
 ```sh
 corepack enable
 yarn install
+node bin/cubeflare.mjs deploy
 ```
 
-## 3. Create R2 Buckets
+Useful options:
 
 ```sh
-yarn wrangler r2 bucket create cubeflare-backups
-yarn wrangler r2 bucket create cubeflare-dynmap
-yarn wrangler r2 bucket create cubeflare-plugins
+cubeflare deploy --account-id <account-id>
+cubeflare deploy --domain minecraft.example.com --public-base-host minecraft.example.com
+cubeflare deploy --worker-name cubeflare --bucket-prefix cubeflare
 ```
 
-Use different bucket names if you prefer, then update `wrangler.jsonc`.
+## 3. R2 S3 Credentials
 
-## 4. Configure `wrangler.jsonc`
+The wizard creates the R2 buckets automatically. The current Sandbox SDK
+production backup and restore transport still needs direct R2 S3 credentials so
+the container can transfer backup snapshots directly to R2.
+
+The wizard tries to create a scoped R2 API token automatically when the
+Cloudflare credential has token-creation permission. If that is not available,
+it opens the exact dashboard location and asks for the R2 S3 Access Key ID and
+Secret Access Key.
+
+For non-interactive deploys:
+
+```sh
+cubeflare deploy \
+  --account-id <account-id> \
+  --r2-access-key-id <access-key-id> \
+  --r2-secret-access-key <secret-access-key> \
+  --non-interactive
+```
+
+Or provide a bootstrap API token that can create account API tokens:
+
+```sh
+CUBEFLARE_BOOTSTRAP_API_TOKEN=<token> cubeflare deploy --account-id <account-id>
+```
+
+## 4. Account-Neutral Configuration
 
 The checked-in `wrangler.jsonc` is intentionally account-neutral. It has no
 custom routes and no account IDs, so one-click deploys can start on workers.dev.
@@ -44,54 +83,36 @@ Set these only when they apply to your deployment:
 `PREVIEW_DNS_READY` can stay `false` unless you configure the wildcard preview
 DNS record.
 
-For a custom domain, add routes with your own zone and hostname, then set
-`PUBLIC_BASE_HOST` to that hostname.
-
-## 5. Configure Secrets
-
-Cubeflare has one app root secret:
-
-```sh
-openssl rand -base64 48 | yarn wrangler secret put CUBEFLARE_SECRET
-```
-
-The current Cloudflare Sandbox SDK backup and restore APIs still need direct R2
-S3 credentials for presigned container-to-R2 transfer:
-
-```sh
-yarn wrangler secret put CLOUDFLARE_ACCOUNT_ID
-yarn wrangler secret put BACKUP_BUCKET_NAME
-yarn wrangler secret put R2_ACCESS_KEY_ID
-yarn wrangler secret put R2_SECRET_ACCESS_KEY
-```
-
-`CLOUDFLARE_R2_ACCOUNT_ID` may be used instead of `CLOUDFLARE_ACCOUNT_ID` if the
-backup bucket belongs to a different account.
+For a custom domain, pass `--domain <hostname>`. The wizard also uses that host
+as `PUBLIC_BASE_HOST` unless you pass a separate `--public-base-host`.
 
 If your backup bucket is in an R2 jurisdiction, add the endpoint in
-`.dev.vars` for local development and as a Worker variable for production:
+`.dev.vars` for local development and pass it during deployment:
 
-```text
-BACKUP_BUCKET_ENDPOINT=https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
+```sh
+cubeflare deploy --backup-bucket-endpoint https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 ```
 
-## 6. Verify Locally
+## 5. Verify Locally
 
 ```sh
 yarn release:check
 ```
 
-## 7. Deploy
+## 6. Manual Deploy
 
 ```sh
-yarn deploy
+corepack enable
+yarn install
+yarn release:check
+node bin/cubeflare.mjs deploy --account-id <account-id>
 ```
 
 Wrangler builds the Worker, uploads static assets, builds the Minecraft
 container image from `Dockerfile`, pushes it to Cloudflare, and updates the
 container application.
 
-## 8. Smoke Test
+## 7. Smoke Test
 
 ```sh
 curl -fsS https://your-worker.workers.dev/api/health

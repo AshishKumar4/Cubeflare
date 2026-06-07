@@ -47,4 +47,33 @@ describe('Cubeflare CLI installer contract', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  it('can bootstrap the CLI before a Cubeflare Worker exists', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cubeflare-bootstrap-installer-'));
+    const installDir = path.join(home, '.local', 'bin');
+
+    try {
+      const install = spawnSync('sh', ['public/install.sh'], {
+        cwd: root,
+        env: {
+          ...process.env,
+          HOME: home,
+          CUBEFLARE_CLI_DOWNLOAD_URL: `file://${path.join(root, 'public', 'downloads', 'cubeflare')}`,
+          CUBEFLARE_INSTALL_DIR: installDir,
+          CUBEFLARE_UPDATE_PROFILE: '0'
+        },
+        encoding: 'utf8'
+      });
+      assert.equal(install.status, 0, install.stderr || install.stdout);
+      assert.match(install.stdout, /cubeflare deploy/);
+
+      const cubeflare = spawnSync(path.join(installDir, 'cubeflare'), ['deploy', '--help'], {
+        encoding: 'utf8'
+      });
+      assert.equal(cubeflare.status, 0, cubeflare.stderr || cubeflare.stdout);
+      assert.match(cubeflare.stdout, /Usage: cubeflare deploy/);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });

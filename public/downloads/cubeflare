@@ -14,6 +14,9 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 const AUTO_PORT_BASE = 25565;
 const AUTO_PORT_SPAN = 20000;
+const DEFAULT_DEPLOY_REPO = 'https://github.com/AshishKumar4/Cubeflare.git';
+const DEFAULT_WORKER_NAME = 'cubeflare';
+const DEFAULT_BUCKET_PREFIX = 'cubeflare';
 const CONNECTOR_INVITE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CONNECTOR_INVITE_SUFFIX_LENGTH = 16;
 const CONNECTOR_INVITE_SUFFIX_GROUPS = 4;
@@ -60,6 +63,14 @@ async function main() {
   }
   if (command === 'servers' || command === 'ls') {
     await commandServers(commandArgv);
+    return;
+  }
+  if (command === 'deploy' || command === 'setup') {
+    await commandDeploy(commandArgv);
+    return;
+  }
+  if (command === 'doctor') {
+    await commandDoctor(commandArgv);
     return;
   }
   if (command === 'whoami' || command === 'me') {
@@ -351,6 +362,182 @@ async function commandServers(argv) {
   printServerTable(response.servers);
 }
 
+async function commandDeploy(argv) {
+  const args = parseOptions(argv, {
+    account: 'value',
+    'account-id': 'value',
+    name: 'value',
+    'worker-name': 'value',
+    'bucket-prefix': 'value',
+    repo: 'value',
+    domain: 'value',
+    route: 'value',
+    'public-base-host': 'value',
+    'preview-hostname': 'value',
+    'preview-dns-ready': 'boolean',
+    'r2-access-key-id': 'value',
+    'r2-secret-access-key': 'value',
+    'cloudflare-api-token': 'value',
+    'backup-bucket-endpoint': 'value',
+    'rotate-root-secret': 'boolean',
+    'skip-install': 'boolean',
+    'skip-check': 'boolean',
+    'non-interactive': 'boolean',
+    yes: 'boolean',
+    'dry-run': 'boolean',
+    help: 'boolean',
+    h: 'boolean'
+  });
+  if (args.help || args.h) {
+    printDeployUsage();
+    return;
+  }
+
+  const interactive = !args['non-interactive'] && !args.yes && process.stdin.isTTY;
+  const workerName = normalizeWorkerName(args['worker-name'] || args.name || process.env.CUBEFLARE_WORKER_NAME || DEFAULT_WORKER_NAME);
+  const bucketPrefix = normalizeBucketName(args['bucket-prefix'] || process.env.CUBEFLARE_BUCKET_PREFIX || DEFAULT_BUCKET_PREFIX);
+  const names = createDeployResourceNames({ workerName, bucketPrefix });
+  const projectDir = await resolveDeployProject(args.repo);
+  const accountRef = args['account-id'] || args.account || process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CUBEFLARE_ACCOUNT_ID || '';
+  const deployEnv = { ...process.env };
+
+  printTitle('Cubeflare Deploy');
+  printBox('Plan', [
+    ['Project', projectDir],
+    ['Worker', workerName],
+    ['Buckets', `${names.backupBucket}, ${names.dynmapBucket}, ${names.pluginBucket}`],
+    ['Domain', args.domain || args.route || 'workers.dev']
+  ]);
+
+  await ensureDeployPrerequisites(projectDir);
+  if (!args['skip-install']) {
+    await runCommand('corepack', ['yarn', 'install'], { cwd: projectDir });
+  }
+
+  let whoami = await readWranglerWhoami(projectDir, deployEnv).catch(() => null);
+  if (!whoami?.loggedIn) {
+    if (!interactive) throw new CliError('Wrangler is not authenticated. Run wrangler login or rerun without --non-interactive.');
+    await runCommand('corepack', ['yarn', 'wrangler', 'login'], { cwd: projectDir, env: deployEnv });
+    whoami = await readWranglerWhoami(projectDir, deployEnv);
+  }
+  const account = await selectCloudflareAccount(whoami.accounts || [], accountRef, interactive);
+  deployEnv.CLOUDFLARE_ACCOUNT_ID = account.id;
+
+  if (args['dry-run']) {
+    printBox('Dry run', [
+      ['Account', `${account.name || account.id} (${account.id})`],
+      ['Worker', workerName],
+      ['Backup bucket', names.backupBucket],
+      ['Dynmap bucket', names.dynmapBucket],
+      ['Plugin bucket', names.pluginBucket]
+    ]);
+    return;
+  }
+
+  await ensureR2Bucket(projectDir, deployEnv, names.backupBucket);
+  await ensureR2Bucket(projectDir, deployEnv, names.dynmapBucket);
+  await ensureR2Bucket(projectDir, deployEnv, names.pluginBucket);
+
+  const r2Credentials = await resolveR2Credentials({
+    accountId: account.id,
+    backupBucket: names.backupBucket,
+    projectDir,
+    deployEnv,
+    args,
+    interactive
+  });
+
+  if (!args['skip-check']) {
+    await runCommand('corepack', ['yarn', 'release:check'], { cwd: projectDir, env: deployEnv });
+  } else {
+    await runCommand('corepack', ['yarn', 'build'], { cwd: projectDir, env: deployEnv });
+  }
+
+  const deployFiles = await writeDeployFiles(projectDir, {
+    workerName,
+    accountId: account.id,
+    names,
+    rootSecretExists: await workerSecretExists(projectDir, deployEnv, workerName, 'CUBEFLARE_SECRET'),
+    rotateRootSecret: Boolean(args['rotate-root-secret']),
+    publicBaseHost: args['public-base-host'] || args.domain || '',
+    previewHostname: args['preview-hostname'] || '',
+    previewDnsReady: Boolean(args['preview-dns-ready']),
+    backupBucketEndpoint: args['backup-bucket-endpoint'] || process.env.BACKUP_BUCKET_ENDPOINT || '',
+    r2Credentials
+  });
+
+  const deployArgs = [
+    'yarn',
+    'wrangler',
+    'deploy',
+    '-c',
+    deployFiles.configPath,
+    '--secrets-file',
+    deployFiles.secretsPath,
+    '--keep-vars',
+    '--containers-rollout',
+    'immediate',
+    '--message',
+    'Cubeflare guided deployment'
+  ];
+  if (args.domain) deployArgs.push('--domain', args.domain);
+  if (args.route) deployArgs.push('--route', args.route);
+
+  const deployOutput = await runCommand('corepack', deployArgs, {
+    cwd: projectDir,
+    env: deployEnv,
+    capture: true
+  });
+  await fs.rm(deployFiles.secretsPath, { force: true }).catch(() => undefined);
+
+  const origin = inferDeployOrigin(deployOutput, args.domain);
+  if (origin) {
+    await smokeTestOrigin(origin);
+    printBox('Deployed', [
+      ['Origin', origin],
+      ['Health', 'ok'],
+      ['Install CLI', `curl -fsSL ${origin}/install.sh | sh`]
+    ]);
+  } else {
+    printBox('Deployed', [
+      ['Worker', workerName],
+      ['Health', 'not checked'],
+      ['Next', 'open the workers.dev URL printed above']
+    ]);
+  }
+}
+
+async function commandDoctor(argv) {
+  const args = parseOptions(argv, {
+    origin: 'value',
+    account: 'value',
+    'account-id': 'value',
+    help: 'boolean',
+    h: 'boolean'
+  });
+  if (args.help || args.h) {
+    printDoctorUsage();
+    return;
+  }
+
+  printTitle('Cubeflare Doctor');
+  await ensureCommand('node');
+  await ensureCommand('corepack');
+  await ensureCommand('docker');
+  const whoami = await readWranglerWhoami(process.cwd(), process.env).catch(() => null);
+  const accountRef = args['account-id'] || args.account || process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CUBEFLARE_ACCOUNT_ID || '';
+  const account = whoami?.loggedIn ? await selectCloudflareAccount(whoami.accounts || [], accountRef, false).catch(() => null) : null;
+  console.log(`${color.green('[ok]')} Node ${process.version}`);
+  console.log(`${color.green('[ok]')} corepack available`);
+  console.log(`${color.green('[ok]')} Docker available`);
+  console.log(whoami?.loggedIn ? `${color.green('[ok]')} Wrangler authenticated` : `${color.yellow('[warn]')} Wrangler is not authenticated`);
+  if (account) console.log(`${color.green('[ok]')} Account ${account.name || account.id}`);
+  if (args.origin) {
+    await smokeTestOrigin(normalizeOrigin(args.origin));
+    console.log(`${color.green('[ok]')} ${normalizeOrigin(args.origin)} health check passed`);
+  }
+}
+
 async function commandWhoami(argv) {
   const args = parseOptions(argv, {
     origin: 'value',
@@ -394,6 +581,438 @@ async function commandLogout(argv) {
   }
   await fs.rm(CONFIG_FILE, { force: true });
   console.log('Signed out of Cubeflare CLI.');
+}
+
+async function resolveDeployProject(repo) {
+  const cwd = process.cwd();
+  if (repo && !isLikelyGitUrl(repo)) {
+    const resolved = path.resolve(repo);
+    if (!(await isCubeflareProject(resolved))) throw new CliError(`${resolved} is not a Cubeflare project.`);
+    return resolved;
+  }
+  if (!repo && (await isCubeflareProject(cwd))) return cwd;
+
+  await ensureCommand('git');
+  const source = repo || DEFAULT_DEPLOY_REPO;
+  const checkout = path.join(CONFIG_DIR, 'source', 'cubeflare');
+  if (await pathExists(path.join(checkout, '.git'))) {
+    await runCommand('git', ['fetch', '--depth', '1', 'origin', 'main'], { cwd: checkout });
+    await runCommand('git', ['reset', '--hard', 'origin/main'], { cwd: checkout });
+  } else {
+    await fs.rm(checkout, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(checkout), { recursive: true });
+    await runCommand('git', ['clone', '--depth', '1', source, checkout], { cwd });
+  }
+  if (!(await isCubeflareProject(checkout))) throw new CliError(`Downloaded source at ${checkout} is not a Cubeflare project.`);
+  return checkout;
+}
+
+async function ensureDeployPrerequisites(projectDir) {
+  await ensureCommand('node');
+  await ensureCommand('corepack');
+  await ensureCommand('docker');
+  const major = Number(process.versions.node.split('.')[0]);
+  if (!Number.isInteger(major) || major < 20) throw new CliError(`Node.js 20 or newer is required; found ${process.version}.`);
+  await runCommand('docker', ['info'], { cwd: projectDir, quiet: true }).catch((error) => {
+    throw new CliError(`Docker is required for the container image build: ${errorMessage(error)}`);
+  });
+}
+
+async function readWranglerWhoami(projectDir, env) {
+  const output = await runCommand('corepack', ['yarn', 'wrangler', 'whoami', '--json'], {
+    cwd: projectDir,
+    env,
+    capture: true,
+    quiet: true
+  });
+  return JSON.parse(output);
+}
+
+async function selectCloudflareAccount(accounts, accountRef, interactive) {
+  if (!accounts.length) throw new CliError('No Cloudflare accounts are available to this Wrangler login.');
+  if (accountRef) {
+    const normalized = String(accountRef).toLowerCase();
+    const found = accounts.find((account) => account.id === accountRef || String(account.name || '').toLowerCase() === normalized);
+    if (!found) throw new CliError(`Cloudflare account not found: ${accountRef}`);
+    return found;
+  }
+  if (accounts.length === 1) return accounts[0];
+  if (!interactive) {
+    throw new CliError('Multiple Cloudflare accounts are available. Pass --account-id <id> or set CUBEFLARE_ACCOUNT_ID.');
+  }
+  console.log('');
+  console.log(color.bold('Choose Cloudflare account'));
+  accounts.forEach((account, index) => {
+    console.log(`  ${index + 1}. ${account.name || account.id} ${color.dim(account.id)}`);
+  });
+  const answer = await promptLine('Account number: ');
+  const index = Number(answer.trim()) - 1;
+  if (!Number.isInteger(index) || index < 0 || index >= accounts.length) throw new CliError('Invalid account selection.');
+  return accounts[index];
+}
+
+async function ensureR2Bucket(projectDir, env, bucket) {
+  const output = await runCommand('corepack', ['yarn', 'wrangler', 'r2', 'bucket', 'list'], {
+    cwd: projectDir,
+    env,
+    capture: true,
+    quiet: true
+  });
+  if (parseWranglerBucketNames(output).includes(bucket)) {
+    console.log(`${color.green('[ok]')} R2 bucket ${bucket}`);
+    return;
+  }
+  await runCommand('corepack', ['yarn', 'wrangler', 'r2', 'bucket', 'create', bucket], { cwd: projectDir, env });
+}
+
+async function resolveR2Credentials(input) {
+  const accessKeyId =
+    input.args['r2-access-key-id'] ||
+    process.env.CUBEFLARE_R2_ACCESS_KEY_ID ||
+    process.env.R2_ACCESS_KEY_ID ||
+    '';
+  const secretAccessKey =
+    input.args['r2-secret-access-key'] ||
+    process.env.CUBEFLARE_R2_SECRET_ACCESS_KEY ||
+    process.env.R2_SECRET_ACCESS_KEY ||
+    '';
+  if (accessKeyId && secretAccessKey) {
+    return { accessKeyId, secretAccessKey, source: 'provided' };
+  }
+
+  const apiToken =
+    input.args['cloudflare-api-token'] ||
+    process.env.CUBEFLARE_BOOTSTRAP_API_TOKEN ||
+    process.env.CLOUDFLARE_API_TOKEN ||
+    (await readWranglerAuthToken(input.projectDir, input.deployEnv).catch(() => ''));
+  if (apiToken) {
+    const created = await tryCreateR2S3Credentials({
+      accountId: input.accountId,
+      bucket: input.backupBucket,
+      apiToken
+    }).catch((error) => {
+      console.log(`${color.yellow('[warn]')} Could not create R2 S3 credentials automatically: ${compact(errorMessage(error))}`);
+      return null;
+    });
+    if (created) return { ...created, source: 'created' };
+  }
+
+  if (!input.interactive) {
+    throw new CliError('R2 S3 credentials are required. Pass --r2-access-key-id and --r2-secret-access-key, or provide CUBEFLARE_BOOTSTRAP_API_TOKEN with API token creation permission.');
+  }
+
+  console.log('');
+  console.log(color.bold('R2 S3 credentials'));
+  console.log('Create an R2 API token with Object Read & Write access to the backup bucket, then paste its S3 credentials.');
+  console.log(`Dashboard: https://dash.cloudflare.com/${input.accountId}/r2/api-tokens`);
+  const promptedAccessKeyId = (await promptLine('Access Key ID: ')).trim();
+  const promptedSecretAccessKey = (await promptHiddenLine('Secret Access Key: ')).trim();
+  if (!promptedAccessKeyId || !promptedSecretAccessKey) throw new CliError('R2 S3 credentials are required.');
+  return { accessKeyId: promptedAccessKeyId, secretAccessKey: promptedSecretAccessKey, source: 'prompted' };
+}
+
+async function readWranglerAuthToken(projectDir, env) {
+  const output = await runCommand('corepack', ['yarn', 'wrangler', 'auth', 'token', '--json'], {
+    cwd: projectDir,
+    env,
+    capture: true,
+    quiet: true
+  });
+  return JSON.parse(output).token || '';
+}
+
+async function tryCreateR2S3Credentials(input) {
+  const groups = await cloudflareApiJson(`/accounts/${input.accountId}/tokens/permission_groups`, {
+    token: input.apiToken
+  });
+  const read = findPermissionGroup(groups.result, 'Workers R2 Storage Bucket Item Read');
+  const write = findPermissionGroup(groups.result, 'Workers R2 Storage Bucket Item Write');
+  const resource = `com.cloudflare.edge.r2.bucket.${input.accountId}_default_${input.bucket}`;
+  const created = await cloudflareApiJson(`/accounts/${input.accountId}/tokens`, {
+    token: input.apiToken,
+    method: 'POST',
+    body: {
+      name: `Cubeflare backups ${input.bucket}`,
+      policies: [
+        {
+          effect: 'allow',
+          resources: { [resource]: '*' },
+          permission_groups: [{ id: read.id }, { id: write.id }]
+        }
+      ]
+    }
+  });
+  const tokenId = created.result?.id;
+  const tokenValue = created.result?.value;
+  if (!tokenId || !tokenValue) throw new Error('Cloudflare did not return the created R2 token value.');
+  return {
+    accessKeyId: tokenId,
+    secretAccessKey: crypto.createHash('sha256').update(tokenValue).digest('hex')
+  };
+}
+
+function findPermissionGroup(groups, name) {
+  const group = (groups || []).find((item) => item.name === name);
+  if (!group?.id) throw new Error(`Cloudflare permission group not found: ${name}`);
+  return group;
+}
+
+async function cloudflareApiJson(apiPath, options) {
+  const response = await fetch(`https://api.cloudflare.com/client/v4${apiPath}`, {
+    method: options.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${options.token}`,
+      ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || body?.success === false) {
+    throw new Error(body?.errors?.map((error) => error.message).join('; ') || response.statusText);
+  }
+  return body;
+}
+
+async function writeDeployFiles(projectDir, input) {
+  const generatedPath = path.join(projectDir, 'dist', 'cubeflare', 'wrangler.json');
+  const generated = JSON.parse(await fs.readFile(generatedPath, 'utf8'));
+  const config = buildDeployWranglerConfig(generated, input);
+  const configPath = path.join(projectDir, 'dist', 'cubeflare', 'wrangler.deploy.json');
+  const secretsPath = path.join(os.tmpdir(), `cubeflare-secrets-${process.pid}-${Date.now()}.json`);
+  const secrets = createDeploySecrets(input);
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  await fs.writeFile(secretsPath, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+  await fs.chmod(secretsPath, 0o600).catch(() => undefined);
+  return { configPath, secretsPath };
+}
+
+function createDeploySecrets(input) {
+  const secrets = {
+    CLOUDFLARE_ACCOUNT_ID: input.accountId,
+    BACKUP_BUCKET_NAME: input.names.backupBucket,
+    R2_ACCESS_KEY_ID: input.r2Credentials.accessKeyId,
+    R2_SECRET_ACCESS_KEY: input.r2Credentials.secretAccessKey
+  };
+  if (!input.rootSecretExists || input.rotateRootSecret) secrets.CUBEFLARE_SECRET = input.rootSecret || randomSecret();
+  if (input.backupBucketEndpoint) secrets.BACKUP_BUCKET_ENDPOINT = input.backupBucketEndpoint;
+  return secrets;
+}
+
+async function workerSecretExists(projectDir, env, workerName, secretName) {
+  const output = await runCommand('corepack', ['yarn', 'wrangler', 'secret', 'list', '--name', workerName], {
+    cwd: projectDir,
+    env,
+    capture: true,
+    quiet: true
+  }).catch(() => '');
+  if (!output) return false;
+  const secrets = JSON.parse(output);
+  return Array.isArray(secrets) && secrets.some((secret) => secret.name === secretName);
+}
+
+function buildDeployWranglerConfig(baseConfig, input) {
+  const config = JSON.parse(JSON.stringify(baseConfig));
+  config.name = input.workerName;
+  config.topLevelName = input.workerName;
+  config.vars = {
+    ...(config.vars || {}),
+    PREVIEW_DNS_READY: input.previewDnsReady ? 'true' : String(config.vars?.PREVIEW_DNS_READY ?? 'false')
+  };
+  if (input.publicBaseHost) config.vars.PUBLIC_BASE_HOST = normalizeHost(input.publicBaseHost);
+  if (input.previewHostname) config.vars.PREVIEW_HOSTNAME = normalizeHost(input.previewHostname);
+  config.r2_buckets = [
+    { binding: 'BACKUP_BUCKET', bucket_name: input.names.backupBucket },
+    { binding: 'DYNMAP_BUCKET', bucket_name: input.names.dynmapBucket },
+    { binding: 'PLUGIN_BUCKET', bucket_name: input.names.pluginBucket }
+  ];
+  config.containers = (config.containers || []).map((container) => ({
+    ...container,
+    name: `${input.workerName}-${String(container.class_name || 'container').toLowerCase()}`
+  }));
+  return config;
+}
+
+function createDeployResourceNames(input = {}) {
+  const workerName = normalizeWorkerName(input.workerName || DEFAULT_WORKER_NAME);
+  const bucketPrefix = normalizeBucketName(input.bucketPrefix || workerName || DEFAULT_BUCKET_PREFIX);
+  return {
+    workerName,
+    bucketPrefix,
+    backupBucket: `${bucketPrefix}-backups`,
+    dynmapBucket: `${bucketPrefix}-dynmap`,
+    pluginBucket: `${bucketPrefix}-plugins`
+  };
+}
+
+async function smokeTestOrigin(origin) {
+  const deadline = Date.now() + 90_000;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(`${origin}/api/health`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`health returned HTTP ${response.status}`);
+      const body = await response.json().catch(() => null);
+      if (body && body.ok === false) throw new Error('health returned ok=false');
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(3000);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error('health check did not complete');
+}
+
+function inferDeployOrigin(output, domain) {
+  if (domain) return `https://${normalizeHost(domain)}`;
+  const match = String(output || '').match(/https:\/\/[^\s]+\.workers\.dev/g);
+  return match?.[0] || '';
+}
+
+async function isCubeflareProject(dir) {
+  try {
+    const pkg = JSON.parse(await fs.readFile(path.join(dir, 'package.json'), 'utf8'));
+    await fs.access(path.join(dir, 'wrangler.jsonc'));
+    return pkg.name === 'cubeflare';
+  } catch {
+    return false;
+  }
+}
+
+async function pathExists(target) {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyGitUrl(value) {
+  return /^(https?:\/\/|git@|ssh:\/\/)/.test(String(value || ''));
+}
+
+function normalizeWorkerName(value) {
+  const name = String(value || '').trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) {
+    throw new CliError('Worker name must be 1-63 lowercase letters, numbers, or hyphens, and cannot start or end with a hyphen.');
+  }
+  return name;
+}
+
+function normalizeBucketName(value) {
+  const name = String(value || '').trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(name) || name.includes('..')) {
+    throw new CliError('R2 bucket prefix must form valid bucket names using lowercase letters, numbers, dots, or hyphens.');
+  }
+  return name;
+}
+
+function normalizeHost(value) {
+  return String(value || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+}
+
+function randomSecret() {
+  return crypto.randomBytes(48).toString('base64');
+}
+
+function parseWranglerBucketNames(output) {
+  return String(output || '')
+    .split(/\r?\n/)
+    .map((line) => line.match(/^name:\s+(.+)$/)?.[1]?.trim())
+    .filter(Boolean);
+}
+
+async function ensureCommand(command) {
+  const checker = process.platform === 'win32' ? 'where' : 'command';
+  const args = process.platform === 'win32' ? [command] : ['-v', command];
+  await runCommand(checker, args, { quiet: true, capture: true }).catch(() => {
+    throw new CliError(`${command} is required.`);
+  });
+}
+
+async function runCommand(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || process.cwd(),
+      env: options.env || process.env,
+      shell: process.platform !== 'win32' && command === 'command',
+      stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : options.quiet ? ['ignore', 'ignore', 'pipe'] : 'inherit'
+    });
+    let stdout = '';
+    let stderr = '';
+    if (child.stdout) {
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+        if (!options.quiet) process.stdout.write(chunk);
+      });
+    }
+    if (child.stderr) {
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+        if (!options.quiet) process.stderr.write(chunk);
+      });
+    }
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new Error(stderr.trim() || `${command} ${args.join(' ')} exited ${code}`));
+    });
+  });
+}
+
+async function promptLine(question) {
+  const readline = await import('node:readline/promises');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(question);
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptHiddenLine(question) {
+  if (!process.stdin.isTTY || !process.stdin.setRawMode) return promptLine(question);
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    let value = '';
+    const cleanup = () => {
+      stdin.setRawMode(false);
+      stdin.off('data', onData);
+      stdin.pause();
+      process.stdout.write('\n');
+    };
+    const onData = (chunk) => {
+      const text = chunk.toString('utf8');
+      for (const char of text) {
+        if (char === '\u0003') {
+          cleanup();
+          reject(new CliError('Cancelled.', 130));
+          return;
+        }
+        if (char === '\r' || char === '\n') {
+          cleanup();
+          resolve(value);
+          return;
+        }
+        if (char === '\u0008' || char === '\u007f') {
+          value = value.slice(0, -1);
+          continue;
+        }
+        value += char;
+      }
+    };
+    process.stdout.write(question);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on('data', onData);
+  });
 }
 
 async function prepareBridgeSession(input) {
@@ -1031,6 +1650,8 @@ function printUsage() {
   console.log('  connect <code>       Connect with a server invite code');
   console.log('  servers              List your Minecraft servers');
   console.log('  servers render-map   Start a Dynmap render');
+  console.log('  deploy               Create Cloudflare resources and deploy Cubeflare');
+  console.log('  doctor               Check local deploy prerequisites');
   console.log('  whoami               Show the signed-in account');
   console.log('  logout               Remove local CLI credentials');
 }
@@ -1055,6 +1676,28 @@ function printServersUsage() {
   console.log('       cubeflare servers start [server name] [--origin <url>]');
   console.log('       cubeflare servers render-map [server name] [--origin <url>]');
   console.log('       cubeflare servers invite [server name] [--prefix <words>] [--rotate] [--origin <url>]');
+}
+
+function printDeployUsage() {
+  console.log('Usage: cubeflare deploy [options]');
+  console.log('');
+  console.log('Options:');
+  console.log('  --account-id <id>              Cloudflare account to deploy into');
+  console.log('  --worker-name <name>           Worker name, default cubeflare');
+  console.log('  --bucket-prefix <prefix>       R2 bucket prefix, default cubeflare');
+  console.log('  --domain <hostname>            Optional Workers custom domain');
+  console.log('  --public-base-host <hostname>  Host used in generated app URLs');
+  console.log('  --repo <path-or-git-url>       Cubeflare source, default current repo or GitHub');
+  console.log('  --r2-access-key-id <id>        Existing R2 S3 access key ID');
+  console.log('  --r2-secret-access-key <key>   Existing R2 S3 secret access key');
+  console.log('  --cloudflare-api-token <token> Token allowed to create scoped R2 API tokens');
+  console.log('  --rotate-root-secret          Replace the existing Cubeflare root secret');
+  console.log('  --skip-check                   Build without running the full release gate');
+  console.log('  --non-interactive              Fail instead of prompting');
+}
+
+function printDoctorUsage() {
+  console.log('Usage: cubeflare doctor [--origin <url>] [--account-id <id>]');
 }
 
 function formatDetail(detail) {
@@ -1115,4 +1758,10 @@ class CliError extends Error {
   }
 }
 
-export { createActivityReporter };
+export {
+  buildDeployWranglerConfig,
+  createActivityReporter,
+  createDeploySecrets,
+  createDeployResourceNames,
+  parseWranglerBucketNames
+};

@@ -52,11 +52,21 @@ periodic backups retain world state, and idle worlds naturally sleep.
 
 ## Deploy
 
-Use the button above to create a Cloudflare deployment from this repository.
-After the Worker project is created, finish the account-specific setup in
-[docs/deployment.md](docs/deployment.md): R2 buckets, Worker secrets, and the
-Sandbox SDK R2 credentials used for direct container-to-R2 backup transfer. A
+Install the CLI and let the deploy wizard create the Cloudflare resources:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AshishKumar4/Cubeflare/main/public/install.sh | sh
+cubeflare deploy
+```
+
+The wizard uses Wrangler login, creates the R2 buckets, configures Worker
+secrets, builds the Worker and Minecraft container image, deploys with an
+immediate container rollout, and smoke-tests the deployed health endpoint. A
 workers.dev hostname works by default; a custom domain is optional.
+
+Use the Deploy to Cloudflare button for a dashboard-first flow, then finish with
+`cubeflare deploy` or the account-specific steps in
+[docs/deployment.md](docs/deployment.md).
 
 Manual deploy:
 
@@ -65,7 +75,7 @@ corepack enable
 yarn install
 cp .dev.vars.example .dev.vars
 yarn release:check
-yarn deploy
+node bin/cubeflare.mjs deploy
 ```
 
 ## Architecture
