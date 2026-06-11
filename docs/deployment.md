@@ -46,7 +46,10 @@ The wizard creates the R2 buckets automatically. The current Sandbox SDK
 production backup and restore transport still needs direct R2 S3 credentials so
 the container can transfer backup snapshots directly to R2.
 
-The wizard tries to create a scoped R2 API token automatically when the
+On redeploys the wizard reuses the R2 credentials already stored as Worker
+secrets, so credentials are only needed the first time (pass
+`--r2-access-key-id` and `--r2-secret-access-key` to rotate them). For a first
+deploy, the wizard tries to create a scoped R2 API token automatically when the
 Cloudflare credential has token-creation permission. If that is not available,
 it opens the exact dashboard location and asks for the R2 S3 Access Key ID and
 Secret Access Key.

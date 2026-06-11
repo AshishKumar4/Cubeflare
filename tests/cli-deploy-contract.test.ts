@@ -88,6 +88,26 @@ describe('Cubeflare deploy CLI contract', () => {
     assert.equal(cli.createDeploySecrets({ ...base, rootSecretExists: false }).CUBEFLARE_SECRET, 'new-root-secret');
   });
 
+  it('reuses existing Worker R2 credentials instead of rewriting them on redeploys', () => {
+    const base = {
+      accountId: 'account-id',
+      names: { backupBucket: 'cubeflare-backups' },
+      rootSecretExists: true
+    };
+
+    const reused = cli.createDeploySecrets({ ...base, r2Credentials: null });
+    assert.equal(reused.R2_ACCESS_KEY_ID, undefined);
+    assert.equal(reused.R2_SECRET_ACCESS_KEY, undefined);
+    assert.equal(reused.BACKUP_BUCKET_NAME, 'cubeflare-backups');
+
+    const written = cli.createDeploySecrets({
+      ...base,
+      r2Credentials: { accessKeyId: 'r2-access-key', secretAccessKey: 'r2-secret-key' }
+    });
+    assert.equal(written.R2_ACCESS_KEY_ID, 'r2-access-key');
+    assert.equal(written.R2_SECRET_ACCESS_KEY, 'r2-secret-key');
+  });
+
   it('does not expose old split auth secrets in deploy docs', () => {
     const docs = readFileSync('docs/deployment.md', 'utf8');
     assert.doesNotMatch(docs, /AUTH_PEPPER|INTERNAL_SHARED_SECRET|GATEWAY_SHARED_SECRET/);

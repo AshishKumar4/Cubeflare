@@ -438,9 +438,11 @@ async function commandDeploy(argv) {
   await ensureR2Bucket(projectDir, deployEnv, names.dynmapBucket);
   await ensureR2Bucket(projectDir, deployEnv, names.pluginBucket);
 
+  const existingSecrets = await listWorkerSecretNames(projectDir, deployEnv, workerName);
   const r2Credentials = await resolveR2Credentials({
     accountId: account.id,
     backupBucket: names.backupBucket,
+    existingSecrets,
     projectDir,
     deployEnv,
     args,
@@ -457,7 +459,7 @@ async function commandDeploy(argv) {
     workerName,
     accountId: account.id,
     names,
-    rootSecretExists: await workerSecretExists(projectDir, deployEnv, workerName, 'CUBEFLARE_SECRET'),
+    rootSecretExists: existingSecrets.has('CUBEFLARE_SECRET'),
     rotateRootSecret: Boolean(args['rotate-root-secret']),
     publicBaseHost: args['public-base-host'] || args.domain || '',
     previewHostname: args['preview-hostname'] || '',
@@ -680,6 +682,11 @@ async function resolveR2Credentials(input) {
     return { accessKeyId, secretAccessKey, source: 'provided' };
   }
 
+  if (input.existingSecrets.has('R2_ACCESS_KEY_ID') && input.existingSecrets.has('R2_SECRET_ACCESS_KEY')) {
+    console.log(`${color.green('[ok]')} Reusing the Worker's existing R2 credentials`);
+    return null;
+  }
+
   const apiToken =
     input.args['cloudflare-api-token'] ||
     process.env.CUBEFLARE_BOOTSTRAP_API_TOKEN ||
@@ -789,25 +796,27 @@ async function writeDeployFiles(projectDir, input) {
 function createDeploySecrets(input) {
   const secrets = {
     CLOUDFLARE_ACCOUNT_ID: input.accountId,
-    BACKUP_BUCKET_NAME: input.names.backupBucket,
-    R2_ACCESS_KEY_ID: input.r2Credentials.accessKeyId,
-    R2_SECRET_ACCESS_KEY: input.r2Credentials.secretAccessKey
+    BACKUP_BUCKET_NAME: input.names.backupBucket
   };
+  if (input.r2Credentials) {
+    secrets.R2_ACCESS_KEY_ID = input.r2Credentials.accessKeyId;
+    secrets.R2_SECRET_ACCESS_KEY = input.r2Credentials.secretAccessKey;
+  }
   if (!input.rootSecretExists || input.rotateRootSecret) secrets.CUBEFLARE_SECRET = input.rootSecret || randomSecret();
   if (input.backupBucketEndpoint) secrets.BACKUP_BUCKET_ENDPOINT = input.backupBucketEndpoint;
   return secrets;
 }
 
-async function workerSecretExists(projectDir, env, workerName, secretName) {
+async function listWorkerSecretNames(projectDir, env, workerName) {
   const output = await runCommand('corepack', ['yarn', 'wrangler', 'secret', 'list', '--name', workerName], {
     cwd: projectDir,
     env,
     capture: true,
     quiet: true
   }).catch(() => '');
-  if (!output) return false;
+  if (!output) return new Set();
   const secrets = JSON.parse(output);
-  return Array.isArray(secrets) && secrets.some((secret) => secret.name === secretName);
+  return new Set(Array.isArray(secrets) ? secrets.map((secret) => secret.name) : []);
 }
 
 function buildDeployWranglerConfig(baseConfig, input) {
