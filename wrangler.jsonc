@@ -26,16 +26,8 @@
   },
   "r2_buckets": [
     {
-      "binding": "BACKUP_BUCKET",
-      "bucket_name": "cubeflare-backups"
-    },
-    {
-      "binding": "DYNMAP_BUCKET",
-      "bucket_name": "cubeflare-dynmap"
-    },
-    {
-      "binding": "PLUGIN_BUCKET",
-      "bucket_name": "cubeflare-plugins"
+      "binding": "BUCKET",
+      "bucket_name": "cubeflare"
     }
   ],
   "containers": [
@@ -63,19 +55,12 @@
     ]
   },
   "migrations": [
-      {
-        "tag": "v1",
-        "new_sqlite_classes": [
-          "IdentityRegistryDO",
-          "UserDO",
-          "ServerDO",
-          "MinecraftSandbox"
-        ]
-      },
     {
-      "tag": "v2",
-      "deleted_classes": [
-        "ServerDO"
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "IdentityRegistryDO",
+        "UserDO",
+        "MinecraftSandbox"
       ]
     }
   ]

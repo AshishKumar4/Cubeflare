@@ -16,7 +16,6 @@ const AUTO_PORT_BASE = 25565;
 const AUTO_PORT_SPAN = 20000;
 const DEFAULT_DEPLOY_REPO = 'https://github.com/AshishKumar4/Cubeflare.git';
 const DEFAULT_WORKER_NAME = 'cubeflare';
-const DEFAULT_BUCKET_PREFIX = 'cubeflare';
 const CONNECTOR_INVITE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CONNECTOR_INVITE_SUFFIX_LENGTH = 16;
 const CONNECTOR_INVITE_SUFFIX_GROUPS = 4;
@@ -67,6 +66,10 @@ async function main() {
   }
   if (command === 'deploy' || command === 'setup') {
     await commandDeploy(commandArgv);
+    return;
+  }
+  if (command === 'undeploy' || command === 'teardown') {
+    await commandUndeploy(commandArgv);
     return;
   }
   if (command === 'doctor') {
@@ -368,7 +371,7 @@ async function commandDeploy(argv) {
     'account-id': 'value',
     name: 'value',
     'worker-name': 'value',
-    'bucket-prefix': 'value',
+    bucket: 'value',
     repo: 'value',
     domain: 'value',
     route: 'value',
@@ -395,8 +398,10 @@ async function commandDeploy(argv) {
 
   const interactive = !args['non-interactive'] && !args.yes && process.stdin.isTTY;
   const workerName = normalizeWorkerName(args['worker-name'] || args.name || process.env.CUBEFLARE_WORKER_NAME || DEFAULT_WORKER_NAME);
-  const bucketPrefix = normalizeBucketName(args['bucket-prefix'] || process.env.CUBEFLARE_BUCKET_PREFIX || DEFAULT_BUCKET_PREFIX);
-  const names = createDeployResourceNames({ workerName, bucketPrefix });
+  const names = createDeployResourceNames({
+    workerName,
+    bucket: args.bucket || process.env.CUBEFLARE_BUCKET || ''
+  });
   const projectDir = await resolveDeployProject(args.repo);
   const accountRef = args['account-id'] || args.account || process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CUBEFLARE_ACCOUNT_ID || '';
   const deployEnv = { ...process.env };
@@ -405,7 +410,7 @@ async function commandDeploy(argv) {
   printBox('Plan', [
     ['Project', projectDir],
     ['Worker', workerName],
-    ['Buckets', `${names.backupBucket}, ${names.dynmapBucket}, ${names.pluginBucket}`],
+    ['Bucket', names.bucket],
     ['Domain', args.domain || args.route || 'workers.dev']
   ]);
 
@@ -427,21 +432,17 @@ async function commandDeploy(argv) {
     printBox('Dry run', [
       ['Account', `${account.name || account.id} (${account.id})`],
       ['Worker', workerName],
-      ['Backup bucket', names.backupBucket],
-      ['Dynmap bucket', names.dynmapBucket],
-      ['Plugin bucket', names.pluginBucket]
+      ['Bucket', names.bucket]
     ]);
     return;
   }
 
-  await ensureR2Bucket(projectDir, deployEnv, names.backupBucket);
-  await ensureR2Bucket(projectDir, deployEnv, names.dynmapBucket);
-  await ensureR2Bucket(projectDir, deployEnv, names.pluginBucket);
+  await ensureR2Bucket(projectDir, deployEnv, names.bucket);
 
   const existingSecrets = await listWorkerSecretNames(projectDir, deployEnv, workerName);
   const r2Credentials = await resolveR2Credentials({
     accountId: account.id,
-    backupBucket: names.backupBucket,
+    bucket: names.bucket,
     existingSecrets,
     projectDir,
     deployEnv,
@@ -506,6 +507,105 @@ async function commandDeploy(argv) {
       ['Health', 'not checked'],
       ['Next', 'open the workers.dev URL printed above']
     ]);
+  }
+}
+
+async function commandUndeploy(argv) {
+  const args = parseOptions(argv, {
+    account: 'value',
+    'account-id': 'value',
+    name: 'value',
+    'worker-name': 'value',
+    bucket: 'value',
+    repo: 'value',
+    'skip-install': 'boolean',
+    yes: 'boolean',
+    'non-interactive': 'boolean',
+    help: 'boolean',
+    h: 'boolean'
+  });
+  if (args.help || args.h) {
+    printUndeployUsage();
+    return;
+  }
+
+  const interactive = !args['non-interactive'] && process.stdin.isTTY;
+  const workerName = normalizeWorkerName(args['worker-name'] || args.name || process.env.CUBEFLARE_WORKER_NAME || DEFAULT_WORKER_NAME);
+  const names = createDeployResourceNames({
+    workerName,
+    bucket: args.bucket || process.env.CUBEFLARE_BUCKET || ''
+  });
+  const projectDir = await resolveDeployProject(args.repo);
+  const accountRef = args['account-id'] || args.account || process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CUBEFLARE_ACCOUNT_ID || '';
+  const deployEnv = { ...process.env };
+
+  printTitle('Cubeflare Undeploy');
+  printBox('Plan', [
+    ['Worker', `${workerName} (Worker, secrets, and Durable Object data)`],
+    ['Bucket', `${names.bucket} (every object, including backups)`]
+  ]);
+
+  await ensureCommand('corepack');
+  if (!args['skip-install']) {
+    await runCommand('corepack', ['yarn', 'install'], { cwd: projectDir });
+  }
+
+  let whoami = await readWranglerWhoami(projectDir, deployEnv).catch(() => null);
+  if (!whoami?.loggedIn) {
+    if (!interactive) throw new CliError('Wrangler is not authenticated. Run wrangler login first.');
+    await runCommand('corepack', ['yarn', 'wrangler', 'login'], { cwd: projectDir, env: deployEnv });
+    whoami = await readWranglerWhoami(projectDir, deployEnv);
+  }
+  const account = await selectCloudflareAccount(whoami.accounts || [], accountRef, interactive);
+  deployEnv.CLOUDFLARE_ACCOUNT_ID = account.id;
+
+  if (!args.yes) {
+    if (!interactive) {
+      throw new CliError('Undeploy permanently deletes the Worker and every bucket object. Re-run with --yes to confirm.');
+    }
+    const answer = (await promptLine(`Type the worker name (${workerName}) to confirm permanent deletion: `)).trim();
+    if (answer !== workerName) throw new CliError('Confirmation did not match; nothing was deleted.');
+  }
+
+  await runCommand('corepack', ['yarn', 'wrangler', 'delete', '--name', workerName, '--force'], {
+    cwd: projectDir,
+    env: deployEnv
+  });
+  console.log(`${color.green('[ok]')} Worker ${workerName} deleted`);
+
+  const apiToken = await readWranglerAuthToken(projectDir, deployEnv).catch(() => '');
+  if (!apiToken) throw new CliError('Could not read the Wrangler auth token needed to purge the bucket.');
+  const removed = await purgeR2Bucket({ accountId: account.id, bucket: names.bucket, apiToken });
+  console.log(`${color.green('[ok]')} Removed ${removed} object${removed === 1 ? '' : 's'} from ${names.bucket}`);
+  await runCommand('corepack', ['yarn', 'wrangler', 'r2', 'bucket', 'delete', names.bucket], {
+    cwd: projectDir,
+    env: deployEnv
+  });
+  console.log(`${color.green('[ok]')} R2 bucket ${names.bucket} deleted`);
+
+  printBox('Undeployed', [
+    ['Worker', workerName],
+    ['Bucket', names.bucket],
+    ['Account', account.name || account.id]
+  ]);
+}
+
+async function purgeR2Bucket(input) {
+  let removed = 0;
+  for (;;) {
+    const listed = await cloudflareApiJson(
+      `/accounts/${input.accountId}/r2/buckets/${input.bucket}/objects?per_page=1000`,
+      { token: input.apiToken }
+    );
+    const keys = (listed.result || []).map((object) => object.key);
+    if (!keys.length) return removed;
+    for (const key of keys) {
+      await cloudflareApiJson(
+        `/accounts/${input.accountId}/r2/buckets/${input.bucket}/objects/${encodeURIComponent(key)}`,
+        { token: input.apiToken, method: 'DELETE' }
+      );
+      removed += 1;
+    }
   }
 }
 
@@ -687,15 +787,17 @@ async function resolveR2Credentials(input) {
     return null;
   }
 
+  // Wrangler's OAuth token can never create API tokens, so only explicit
+  // API tokens are worth trying here.
   const apiToken =
     input.args['cloudflare-api-token'] ||
     process.env.CUBEFLARE_BOOTSTRAP_API_TOKEN ||
     process.env.CLOUDFLARE_API_TOKEN ||
-    (await readWranglerAuthToken(input.projectDir, input.deployEnv).catch(() => ''));
+    '';
   if (apiToken) {
     const created = await tryCreateR2S3Credentials({
       accountId: input.accountId,
-      bucket: input.backupBucket,
+      bucket: input.bucket,
       apiToken
     }).catch((error) => {
       console.log(`${color.yellow('[warn]')} Could not create R2 S3 credentials automatically: ${compact(errorMessage(error))}`);
@@ -796,7 +898,7 @@ async function writeDeployFiles(projectDir, input) {
 function createDeploySecrets(input) {
   const secrets = {
     CLOUDFLARE_ACCOUNT_ID: input.accountId,
-    BACKUP_BUCKET_NAME: input.names.backupBucket
+    BACKUP_BUCKET_NAME: input.names.bucket
   };
   if (input.r2Credentials) {
     secrets.R2_ACCESS_KEY_ID = input.r2Credentials.accessKeyId;
@@ -829,11 +931,7 @@ function buildDeployWranglerConfig(baseConfig, input) {
   };
   if (input.publicBaseHost) config.vars.PUBLIC_BASE_HOST = normalizeHost(input.publicBaseHost);
   if (input.previewHostname) config.vars.PREVIEW_HOSTNAME = normalizeHost(input.previewHostname);
-  config.r2_buckets = [
-    { binding: 'BACKUP_BUCKET', bucket_name: input.names.backupBucket },
-    { binding: 'DYNMAP_BUCKET', bucket_name: input.names.dynmapBucket },
-    { binding: 'PLUGIN_BUCKET', bucket_name: input.names.pluginBucket }
-  ];
+  config.r2_buckets = [{ binding: 'BUCKET', bucket_name: input.names.bucket }];
   config.containers = (config.containers || []).map((container) => ({
     ...container,
     name: `${input.workerName}-${String(container.class_name || 'container').toLowerCase()}`
@@ -843,14 +941,8 @@ function buildDeployWranglerConfig(baseConfig, input) {
 
 function createDeployResourceNames(input = {}) {
   const workerName = normalizeWorkerName(input.workerName || DEFAULT_WORKER_NAME);
-  const bucketPrefix = normalizeBucketName(input.bucketPrefix || workerName || DEFAULT_BUCKET_PREFIX);
-  return {
-    workerName,
-    bucketPrefix,
-    backupBucket: `${bucketPrefix}-backups`,
-    dynmapBucket: `${bucketPrefix}-dynmap`,
-    pluginBucket: `${bucketPrefix}-plugins`
-  };
+  const bucket = normalizeBucketName(input.bucket || workerName);
+  return { workerName, bucket };
 }
 
 async function smokeTestOrigin(origin) {
@@ -915,7 +1007,7 @@ function normalizeWorkerName(value) {
 function normalizeBucketName(value) {
   const name = String(value || '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(name) || name.includes('..')) {
-    throw new CliError('R2 bucket prefix must form valid bucket names using lowercase letters, numbers, dots, or hyphens.');
+    throw new CliError('R2 bucket name must use lowercase letters, numbers, dots, or hyphens.');
   }
   return name;
 }
@@ -1660,6 +1752,7 @@ function printUsage() {
   console.log('  servers              List your Minecraft servers');
   console.log('  servers render-map   Start a Dynmap render');
   console.log('  deploy               Create Cloudflare resources and deploy Cubeflare');
+  console.log('  undeploy             Delete the Worker and the R2 bucket with all data');
   console.log('  doctor               Check local deploy prerequisites');
   console.log('  whoami               Show the signed-in account');
   console.log('  logout               Remove local CLI credentials');
@@ -1693,7 +1786,7 @@ function printDeployUsage() {
   console.log('Options:');
   console.log('  --account-id <id>              Cloudflare account to deploy into');
   console.log('  --worker-name <name>           Worker name, default cubeflare');
-  console.log('  --bucket-prefix <prefix>       R2 bucket prefix, default cubeflare');
+  console.log('  --bucket <name>                R2 bucket name, default matches the worker name');
   console.log('  --domain <hostname>            Optional Workers custom domain');
   console.log('  --public-base-host <hostname>  Host used in generated app URLs');
   console.log('  --repo <path-or-git-url>       Cubeflare source, default current repo or GitHub');
@@ -1703,6 +1796,20 @@ function printDeployUsage() {
   console.log('  --rotate-root-secret          Replace the existing Cubeflare root secret');
   console.log('  --skip-check                   Build without running the full release gate');
   console.log('  --non-interactive              Fail instead of prompting');
+}
+
+function printUndeployUsage() {
+  console.log('Usage: cubeflare undeploy [options]');
+  console.log('');
+  console.log('Permanently deletes the Worker (with its secrets and Durable Object data)');
+  console.log('and the R2 bucket including every backup.');
+  console.log('');
+  console.log('Options:');
+  console.log('  --account-id <id>     Cloudflare account that hosts the deployment');
+  console.log('  --worker-name <name>  Worker name, default cubeflare');
+  console.log('  --bucket <name>       R2 bucket name, default matches the worker name');
+  console.log('  --yes                 Skip the confirmation prompt');
+  console.log('  --non-interactive     Fail instead of prompting');
 }
 
 function printDoctorUsage() {

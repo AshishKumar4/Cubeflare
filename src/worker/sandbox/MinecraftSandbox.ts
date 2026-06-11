@@ -476,25 +476,6 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     return runtime;
   }
 
-  async publishControlSnapshot(): Promise<ServerControlSnapshot> {
-    const manifest = this.requireManifest();
-    const summary =
-      this.getSummary() ??
-      this.summaryFromManifest(
-        manifest,
-        this.getStatusValue(),
-        this.currentPresence(),
-      );
-    const snapshot = this.controlSnapshot(
-      summary,
-      this.getJson<MinecraftRuntimeStatus>(RUNTIME_CACHE_KEY),
-    );
-    await this.env.USER_DO.getByName(manifest.ownerId).upsertServerSnapshot(
-      snapshot,
-    );
-    return snapshot;
-  }
-
   async backup(reason = "manual-backup"): Promise<BackupRecord> {
     this.assertNotDeleting();
     if (this.getStatusValue() !== "running") {
@@ -1234,14 +1215,14 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     ];
     for (const id of ids) {
       await Promise.all([
-        this.env.BACKUP_BUCKET.delete(`backups/${id}/data.sqsh`),
-        this.env.BACKUP_BUCKET.delete(`backups/${id}/meta.json`),
+        this.env.BUCKET.delete(`backups/${id}/data.sqsh`),
+        this.env.BUCKET.delete(`backups/${id}/meta.json`),
       ]).catch(() => undefined);
     }
   }
 
   private async backupSizeBytes(backupId: string): Promise<number | undefined> {
-    const meta = await this.env.BACKUP_BUCKET.get(
+    const meta = await this.env.BUCKET.get(
       `backups/${backupId}/meta.json`,
     ).catch(() => null);
     const metadata = await meta

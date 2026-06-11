@@ -465,7 +465,7 @@ app.get('/api/servers/:serverId/dynmap', requireAuth(), async (c) => {
     previewError = 'Sandbox preview DNS is not configured; using the mirrored map route.';
   }
   const r2Key = `dynmap/${manifest.serverId}/index.html`;
-  const mirroredIndex = await c.env.DYNMAP_BUCKET.head(r2Key);
+  const mirroredIndex = await c.env.BUCKET.head(r2Key);
   const dynmapCompatibility = manifest.plugins.some(
     (plugin) => plugin.enabled && plugin.filename === 'dynmap.jar' && plugin.source.type !== 'builtin'
   )
@@ -611,13 +611,10 @@ async function authorizedServerSnapshot(
   userId: string
 ): Promise<ServerControlSnapshot> {
   const snapshot = await env.USER_DO.getByName(userId).getServerSnapshot(serverId.toLowerCase());
-  if (snapshot && snapshot.summary.ownerId === userId && snapshot.manifest.ownerId === userId) {
-    return snapshot;
+  if (!snapshot || snapshot.summary.ownerId !== userId || snapshot.manifest.ownerId !== userId) {
+    throw new HttpError(404, 'server_not_found', 'Server not found');
   }
-  // Servers created before snapshots existed have no row yet; publish one from
-  // the sandbox once so every later read stays passive.
-  const server = await authorizedServer(env, serverId, userId);
-  return server.publishControlSnapshot();
+  return snapshot;
 }
 
 async function authorizedManifest(
@@ -1341,7 +1338,7 @@ function cleanPluginFilename(value: string): string {
 async function serveDynmap(env: AppEnv, serverId: string, path: string): Promise<Response> {
   const keySuffix = dynmapPathSuffix(serverId, path);
   const key = `dynmap/${serverId}/${keySuffix || 'index.html'}`;
-  const object = await env.DYNMAP_BUCKET.get(key);
+  const object = await env.BUCKET.get(key);
   if (!object) {
     if (keySuffix === 'standalone/config.js') {
       return dynmapSecurityHeaders(dynmapStandaloneConfigResponse());
@@ -1357,7 +1354,7 @@ async function serveDynmap(env: AppEnv, serverId: string, path: string): Promise
 async function hasDynmapWorldTiles(env: AppEnv, serverId: string): Promise<boolean> {
   const worlds = await dynmapWorldNames(env, serverId);
   for (const world of worlds) {
-    const listed = await env.DYNMAP_BUCKET.list({
+    const listed = await env.BUCKET.list({
       prefix: `dynmap/${serverId}/tiles/${world}/`,
       limit: 1
     });
@@ -1368,7 +1365,7 @@ async function hasDynmapWorldTiles(env: AppEnv, serverId: string): Promise<boole
 
 async function dynmapWorldNames(env: AppEnv, serverId: string): Promise<string[]> {
   const fallback = ['world'];
-  const configuration = await env.DYNMAP_BUCKET.get(`dynmap/${serverId}/up/configuration`).catch(() => null);
+  const configuration = await env.BUCKET.get(`dynmap/${serverId}/up/configuration`).catch(() => null);
   if (!configuration) return fallback;
   const parsed = await configuration.json<{ worlds?: Array<{ name?: unknown }> }>().catch(() => null);
   const worlds = parsed?.worlds
@@ -1454,7 +1451,7 @@ async function handleDynmapUpload(
   if (!timingSafeEqual(expected, signature)) {
     throw new HttpError(401, 'bad_dynmap_signature', 'Dynmap upload signature is invalid');
   }
-  await env.DYNMAP_BUCKET.put(`dynmap/${serverId}/${rel}`, request.body, {
+  await env.BUCKET.put(`dynmap/${serverId}/${rel}`, request.body, {
     httpMetadata: {
       contentType: request.headers.get('Content-Type') ?? 'application/octet-stream'
     }
@@ -1603,17 +1600,7 @@ async function authorizeConnectorSnapshot(
   if (invite.kind !== 'primary') {
     throw new HttpError(401, 'invalid_invite_code', 'Invite code is not a server invite');
   }
-  let snapshot: ServerControlSnapshot | null = await env.USER_DO.getByName(invite.ownerId).getServerSnapshot(
-    invite.serverId
-  );
-  if (!snapshot) {
-    // Backfill for servers that predate snapshots: publish one from the
-    // sandbox so later connector reads stay passive.
-    const server = await minecraftSandboxById(env, invite.serverId);
-    if ((await server.getOwnerId()) === invite.ownerId) {
-      snapshot = await server.publishControlSnapshot();
-    }
-  }
+  const snapshot = await env.USER_DO.getByName(invite.ownerId).getServerSnapshot(invite.serverId);
   if (!snapshot || snapshot.manifest.ownerId !== invite.ownerId) {
     throw new HttpError(404, 'server_not_found', 'Server not found');
   }

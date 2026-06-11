@@ -49,14 +49,4 @@ describe('control-plane read contract', () => {
       assert.doesNotMatch(route, /authorizedServerSnapshot/);
     }
   });
-
-  it('backfills snapshots once for servers that predate snapshot sync', () => {
-    for (const [start, end] of [
-      ['async function authorizedServerSnapshot', 'async function authorizedManifest'],
-      ['async function authorizeConnectorSnapshot', 'function connectorServerMatches']
-    ] as const) {
-      const helper = routeBody(worker, start, end);
-      assert.match(helper, /publishControlSnapshot\(\)/);
-    }
-  });
 });

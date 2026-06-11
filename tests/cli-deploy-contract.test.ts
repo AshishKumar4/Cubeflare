@@ -9,12 +9,13 @@ const cli = await import(pathToFileURL(path.join(root, 'public', 'downloads', 'c
 
 describe('Cubeflare deploy CLI contract', () => {
   it('derives stable Worker and R2 resource names', () => {
-    assert.deepEqual(cli.createDeployResourceNames({ workerName: 'cubeflare', bucketPrefix: 'cubeflare' }), {
+    assert.deepEqual(cli.createDeployResourceNames({ workerName: 'cubeflare' }), {
       workerName: 'cubeflare',
-      bucketPrefix: 'cubeflare',
-      backupBucket: 'cubeflare-backups',
-      dynmapBucket: 'cubeflare-dynmap',
-      pluginBucket: 'cubeflare-plugins'
+      bucket: 'cubeflare'
+    });
+    assert.deepEqual(cli.createDeployResourceNames({ workerName: 'mine-host', bucket: 'custom-bucket' }), {
+      workerName: 'mine-host',
+      bucket: 'custom-bucket'
     });
   });
 
@@ -38,11 +39,7 @@ describe('Cubeflare deploy CLI contract', () => {
 
     const config = cli.buildDeployWranglerConfig(generated, {
       workerName: 'mine-host',
-      names: {
-        backupBucket: 'mine-host-backups',
-        dynmapBucket: 'mine-host-dynmap',
-        pluginBucket: 'mine-host-plugins'
-      },
+      names: { bucket: 'mine-host' },
       publicBaseHost: 'https://minecraft.example.com/path',
       previewHostname: 'preview.minecraft.example.com',
       previewDnsReady: true
@@ -50,11 +47,7 @@ describe('Cubeflare deploy CLI contract', () => {
 
     assert.equal(config.name, 'mine-host');
     assert.equal(config.topLevelName, 'mine-host');
-    assert.deepEqual(config.r2_buckets, [
-      { binding: 'BACKUP_BUCKET', bucket_name: 'mine-host-backups' },
-      { binding: 'DYNMAP_BUCKET', bucket_name: 'mine-host-dynmap' },
-      { binding: 'PLUGIN_BUCKET', bucket_name: 'mine-host-plugins' }
-    ]);
+    assert.deepEqual(config.r2_buckets, [{ binding: 'BUCKET', bucket_name: 'mine-host' }]);
     assert.equal(config.containers[0].name, 'mine-host-minecraftsandbox');
     assert.equal(config.vars.PUBLIC_BASE_HOST, 'minecraft.example.com');
     assert.equal(config.vars.PREVIEW_HOSTNAME, 'preview.minecraft.example.com');
@@ -75,7 +68,7 @@ describe('Cubeflare deploy CLI contract', () => {
   it('does not rotate the Cubeflare root secret on ordinary redeploys', () => {
     const base = {
       accountId: 'account-id',
-      names: { backupBucket: 'cubeflare-backups' },
+      names: { bucket: 'cubeflare' },
       r2Credentials: {
         accessKeyId: 'r2-access-key',
         secretAccessKey: 'r2-secret-key'
@@ -91,14 +84,14 @@ describe('Cubeflare deploy CLI contract', () => {
   it('reuses existing Worker R2 credentials instead of rewriting them on redeploys', () => {
     const base = {
       accountId: 'account-id',
-      names: { backupBucket: 'cubeflare-backups' },
+      names: { bucket: 'cubeflare' },
       rootSecretExists: true
     };
 
     const reused = cli.createDeploySecrets({ ...base, r2Credentials: null });
     assert.equal(reused.R2_ACCESS_KEY_ID, undefined);
     assert.equal(reused.R2_SECRET_ACCESS_KEY, undefined);
-    assert.equal(reused.BACKUP_BUCKET_NAME, 'cubeflare-backups');
+    assert.equal(reused.BACKUP_BUCKET_NAME, 'cubeflare');
 
     const written = cli.createDeploySecrets({
       ...base,
@@ -106,6 +99,22 @@ describe('Cubeflare deploy CLI contract', () => {
     });
     assert.equal(written.R2_ACCESS_KEY_ID, 'r2-access-key');
     assert.equal(written.R2_SECRET_ACCESS_KEY, 'r2-secret-key');
+  });
+
+  it('guards undeploy behind explicit confirmation and tears everything down', () => {
+    const source = readFileSync(path.join(root, 'public', 'downloads', 'cubeflare'), 'utf8');
+    const start = source.indexOf('async function commandUndeploy');
+    const end = source.indexOf('async function commandDoctor', start);
+    assert.notEqual(start, -1);
+    const undeploy = source.slice(start, end);
+
+    assert.match(undeploy, /Type the worker name/);
+    assert.match(undeploy, /Re-run with --yes to confirm/);
+    assert.match(undeploy, /'wrangler', 'delete', '--name', workerName, '--force'/);
+    assert.match(undeploy, /purgeR2Bucket\(/);
+    const purgeIndex = undeploy.indexOf('purgeR2Bucket(');
+    const bucketDeleteIndex = undeploy.indexOf("'r2', 'bucket', 'delete'");
+    assert.ok(bucketDeleteIndex > purgeIndex, 'bucket must be purged before deletion');
   });
 
   it('does not expose old split auth secrets in deploy docs', () => {

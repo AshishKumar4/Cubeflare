@@ -21,7 +21,7 @@
   <g font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13">
     <text x="24" y="78"><tspan fill="#4fcb76">$ </tspan><tspan fill="#e6edf3">curl</tspan><tspan fill="#8b949e"> -fsSL </tspan><tspan fill="#5cc8f2">https://raw.githubusercontent.com/AshishKumar4/Cubeflare/main/public/install.sh</tspan><tspan fill="#8b949e"> | </tspan><tspan fill="#e6edf3">sh</tspan></text>
     <text x="24" y="106"><tspan fill="#4fcb76">$ </tspan><tspan fill="#f38020" font-weight="700">cubeflare</tspan><tspan fill="#e6edf3" font-weight="700"> deploy</tspan></text>
-    <text x="24" y="138"><tspan fill="#4fcb76">✔</tspan><tspan fill="#9ad9a8"> R2 buckets · Worker secrets · container image · Worker deployed</tspan></text>
+    <text x="24" y="138"><tspan fill="#4fcb76">✔</tspan><tspan fill="#9ad9a8"> R2 bucket · Worker secrets · container image · Worker deployed</tspan></text>
     <text x="24" y="164"><tspan fill="#4fcb76">✔</tspan><tspan fill="#9ad9a8"> health check passed — your Minecraft fleet is live on workers.dev</tspan></text>
     <text x="24" y="194"><tspan fill="#4fcb76">$</tspan></text>
   </g>

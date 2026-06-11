@@ -64,10 +64,17 @@ curl -fsSL https://raw.githubusercontent.com/AshishKumar4/Cubeflare/main/public/
 cubeflare deploy
 ```
 
-The wizard uses Wrangler login, creates the R2 buckets, configures Worker
+The wizard uses Wrangler login, creates the R2 bucket, configures Worker
 secrets, builds the Worker and Minecraft container image, deploys with an
 immediate container rollout, and smoke-tests the deployed health endpoint. A
 workers.dev hostname works by default; a custom domain is optional.
+
+Tear everything down again — the Worker, its Durable Object data, and the R2
+bucket including all backups — with:
+
+```sh
+cubeflare undeploy
+```
 
 Prefer a dashboard-first flow? Start from
 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/AshishKumar4/Cubeflare),
@@ -97,7 +104,7 @@ Cloudflare Worker + Hono + Static Assets
     +-- MinecraftSandbox DO: one Minecraft world and one Sandbox container
             |
             +-- Cloudflare Container: Java server, bridge, Dynmap sync
-            +-- R2: backups, plugin uploads, Dynmap mirror
+            +-- R2 bucket: backups/ and dynmap/ prefixes
 ```
 
 Minecraft Java uses TCP, while Workers expose HTTP and WebSocket request

@@ -7,9 +7,7 @@ import type { MinecraftJavaConfig } from '../shared/minecraft-optimization';
 
 export type AppEnv = {
   ASSETS: Fetcher;
-  BACKUP_BUCKET: R2Bucket;
-  DYNMAP_BUCKET: R2Bucket;
-  PLUGIN_BUCKET: R2Bucket;
+  BUCKET: R2Bucket;
   IDENTITY_REGISTRY: DurableObjectNamespace<IdentityRegistryDO>;
   USER_DO: DurableObjectNamespace<UserDO>;
   MINECRAFT_SANDBOX: DurableObjectNamespace<MinecraftSandbox>;
