@@ -270,34 +270,74 @@ svg { flex: none; }
   border-color: #63bee9;
   box-shadow: 0 8px 0 #174f71, 0 9px 0 #0f344a;
 }
-.serverTower {
+.voxel {
+  --vs: 48px;
   position: absolute;
-  left: 50%;
-  top: 72px;
-  display: grid;
-  gap: 7px;
-  transform: translateX(-50%) translateZ(86px) rotateZ(37deg) rotateX(-58deg);
+  left: calc(35px + var(--gx, 0) * 52px);
+  top: calc(var(--gy, 0) * 52px);
+  width: var(--vs);
+  height: var(--vs);
+  transform: translateZ(calc(var(--gz, 0) * var(--vs)));
+  transform-style: preserve-3d;
 }
-.serverTower span {
-  width: 82px;
-  height: 32px;
-  border-radius: 6px;
-  background: #d8e7f7;
-  border: 1px solid #fff;
-  box-shadow: 0 9px 0 #7d8ea0;
-}
-.playerDot {
+.vFace {
   position: absolute;
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  background: var(--red);
-  border: 2px solid #fff;
-  transform: translateZ(92px);
+  inset: 0;
+  backface-visibility: hidden;
+  box-shadow: inset 0 0 0 1px rgba(11, 15, 20, .22);
 }
-.playerDot.one { left: 96px; top: 124px; }
-.playerDot.two { left: 246px; top: 220px; background: var(--green); }
-.playerDot.three { left: 318px; top: 78px; background: var(--cyan); }
+.vFace.top { transform: translateZ(var(--vs)); }
+.vFace.north { transform-origin: top; transform: rotateX(90deg); }
+.vFace.south { transform-origin: bottom; transform: rotateX(-90deg); }
+.vFace.east { transform-origin: right; transform: rotateY(90deg); }
+.vFace.west { transform-origin: left; transform: rotateY(-90deg); }
+.vFace.north, .vFace.south { filter: brightness(.8); }
+.vFace.east, .vFace.west { filter: brightness(.62); }
+.voxel.grass .vFace,
+.voxel.dirt .vFace {
+  background-color: #7a5230;
+  background-image: repeating-conic-gradient(rgba(255, 255, 255, .05) 0 25%, rgba(0, 0, 0, .08) 0 50%);
+  background-size: 24px 24px;
+}
+.voxel.grass .vFace {
+  background-image:
+    repeating-conic-gradient(rgba(255, 255, 255, .05) 0 25%, rgba(0, 0, 0, .08) 0 50%),
+    linear-gradient(#58b14e 0 11px, #7a5230 11px);
+  background-size: 24px 24px, auto;
+}
+.voxel.grass .vFace.top {
+  background-color: #58b14e;
+  background-image: repeating-conic-gradient(rgba(255, 255, 255, .09) 0 25%, rgba(13, 40, 18, .14) 0 50%);
+  background-size: 24px 24px;
+}
+.voxel.wood .vFace {
+  background-image: repeating-linear-gradient(90deg, #6f4a27 0 7px, #5c3c1f 7px 10px, #6f4a27 10px 17px, #654323 17px 24px);
+}
+.voxel.wood .vFace.top {
+  background:
+    radial-gradient(circle at 50% 50%, #c89a5d 0 6px, #8a6336 6px 9px, #b3854c 9px 15px, #8a6336 15px 18px, #a3784a 18px 24px, #6f4a27 24px);
+}
+.voxel.leaf .vFace {
+  background-color: #2f8a3e;
+  background-image:
+    radial-gradient(rgba(11, 46, 17, .5) 3px, transparent 3.5px),
+    repeating-conic-gradient(rgba(214, 255, 210, .1) 0 25%, rgba(11, 46, 17, .18) 0 50%);
+  background-size: 16px 16px, 24px 24px;
+}
+.voxel.ore .vFace {
+  background-color: #8d939d;
+  background-image:
+    radial-gradient(circle 4.5px at 14px 15px, #e3b84d 98%, transparent),
+    radial-gradient(circle 3.5px at 33px 31px, #e3b84d 98%, transparent),
+    radial-gradient(circle 3px at 30px 9px, #e3b84d 98%, transparent),
+    repeating-conic-gradient(rgba(255, 255, 255, .07) 0 25%, rgba(20, 26, 34, .12) 0 50%);
+  background-size: auto, auto, auto, 24px 24px;
+}
+.voxel.player { --vs: 16px; }
+.voxel.player .vFace { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .4); }
+.voxel.player.one .vFace { background: var(--red); }
+.voxel.player.two .vFace { background: var(--green); }
+.voxel.player.three .vFace { background: var(--cyan); }
 .sceneOps {
   position: absolute;
   left: 14px;
@@ -1643,6 +1683,10 @@ input[type="checkbox"] {
 @media (max-width: 600px) {
   .landingSignals, .fleetStats, .splitInputs, .toggleGrid, .serverCards, .heroKpis, .sceneOps {
     grid-template-columns: 1fr;
+  }
+  .worldStage {
+    transform-origin: 50% 100%;
+    transform: translateX(-50%) scale(.8) perspective(720px) rotateX(58deg) rotateZ(-37deg);
   }
   .vitalGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

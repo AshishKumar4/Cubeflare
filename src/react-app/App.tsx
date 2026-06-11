@@ -633,6 +633,32 @@ function CliAuthScreen({
   );
 }
 
+const HERO_VOXELS: Array<{ col: number; row: number; z: number; kind: string }> = [
+  { col: 1, row: 3, z: 0, kind: 'ore' },
+  { col: 2, row: 3, z: 0, kind: 'grass' },
+  { col: 4, row: 1, z: 0, kind: 'grass' },
+  { col: 3, row: 2, z: 0, kind: 'wood' },
+  { col: 3, row: 2, z: 1, kind: 'wood' },
+  { col: 2, row: 2, z: 2, kind: 'leaf' },
+  { col: 4, row: 2, z: 2, kind: 'leaf' },
+  { col: 3, row: 1, z: 2, kind: 'leaf' },
+  { col: 3, row: 3, z: 2, kind: 'leaf' },
+  { col: 3, row: 2, z: 2, kind: 'leaf' },
+  { col: 3, row: 2, z: 3, kind: 'leaf' }
+];
+
+function Voxel({ kind, style }: { kind: string; style: CSSProperties }) {
+  return (
+    <div className={`voxel ${kind}`} style={style}>
+      <span className="vFace top" />
+      <span className="vFace north" />
+      <span className="vFace east" />
+      <span className="vFace south" />
+      <span className="vFace west" />
+    </div>
+  );
+}
+
 function LandingScreen({
   mode,
   setMode,
@@ -710,14 +736,16 @@ function LandingScreen({
                 <span key={index} className={index % 7 === 0 ? 'lit' : index % 5 === 0 ? 'water' : ''} />
               ))}
             </div>
-            <div className="serverTower">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="playerDot one" />
-            <div className="playerDot two" />
-            <div className="playerDot three" />
+            {HERO_VOXELS.map((voxel) => (
+              <Voxel
+                key={`${voxel.col}:${voxel.row}:${voxel.z}`}
+                kind={voxel.kind}
+                style={{ '--gx': voxel.col, '--gy': voxel.row, '--gz': voxel.z } as CSSProperties}
+              />
+            ))}
+            <Voxel kind="player one" style={{ left: 104, top: 66 }} />
+            <Voxel kind="player two" style={{ left: 246, top: 220 }} />
+            <Voxel kind="player three" style={{ left: 318, top: 78 }} />
           </div>
           <div className="sceneOps">
             <span>
