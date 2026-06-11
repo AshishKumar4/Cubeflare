@@ -72,6 +72,105 @@ describe('server lifecycle contract', () => {
     assert.doesNotMatch(sandboxSource, /queuePeriodicBackup/);
   });
 
+  it('does not keep scheduling lifecycle ticks for idle running containers', () => {
+    const lifecycleTick = methodBody(
+      sandboxSource,
+      'async lifecycleTick',
+      'async writeManifest'
+    );
+    const idleBranchStart = lifecycleTick.indexOf('if (!decision.inspectRuntime)');
+    assert.notEqual(idleBranchStart, -1);
+    const activeBranchStart = lifecycleTick.indexOf('try {', idleBranchStart);
+    assert.notEqual(activeBranchStart, -1);
+    const idleBranch = lifecycleTick.slice(idleBranchStart, activeBranchStart);
+
+    assert.match(idleBranch, /return/);
+    assert.doesNotMatch(idleBranch, /scheduleLifecycleTick/);
+    assert.match(lifecycleTick, /finally\s*\{\s*await this\.scheduleLifecycleTick\(\)/);
+  });
+
+  it('publishes a stopped snapshot when the container naturally stops', () => {
+    const onStop = methodBody(
+      sandboxSource,
+      'override async onStop',
+      'async recordConnectorActivity'
+    );
+
+    assert.match(onStop, /offlineRuntime\(manifest,\s*["']stopped["']\)/);
+    assert.match(onStop, /this\.putJson\(["']summary["'],\s*summary\)/);
+    assert.match(onStop, /await this\.syncUserSnapshot\(summary\)/);
+    assert.doesNotMatch(onStop, /syncUserSnapshot\(summary\)\.catch/);
+  });
+
+  it('saves, stops Minecraft, then destroys the container before publishing stopped', () => {
+    const stopServer = methodBody(
+      sandboxSource,
+      'async stopServer',
+      'async restartServer'
+    );
+
+    assert.match(stopServer, /clearLifecycleTick\(\)/);
+    assert.match(stopServer, /clearConnectorActivity\(\)/);
+    assert.match(stopServer, /createAndStoreBackup\(reason,\s*\{\s*\n?\s*required:\s*false,?\s*\n?\s*\}\)/);
+    assert.doesNotMatch(stopServer, /if \(!backup\) throw new Error\("Backup was not created"\)/);
+    // A backup error must abort the stop before the container is destroyed.
+    assert.doesNotMatch(stopServer, /catch\s*\{[^}]*backup = null/);
+    assert.match(stopServer, /requestMinecraftStop\(\)/);
+    const backupIndex = stopServer.indexOf('createAndStoreBackup');
+    const killIndex = stopServer.indexOf('await this.killMinecraftProcesses()');
+    const destroyIndex = stopServer.indexOf('await this.destroyStoppedContainer()', killIndex);
+    const stoppedEventIndex = stopServer.indexOf('appendEvent("server.stopped"', destroyIndex);
+    const finalSyncIndex = stopServer.lastIndexOf('await this.syncUserSnapshot(summary)');
+    assert.ok(killIndex > backupIndex);
+    assert.ok(destroyIndex > killIndex);
+    assert.ok(stoppedEventIndex > destroyIndex);
+    assert.ok(finalSyncIndex > stoppedEventIndex);
+    assert.match(stopServer, /offlineRuntime\(this\.requireManifest\(\),\s*["']stopped["']\)/);
+    assert.match(stopServer, /appendEvent\(["']server\.stopped["']/);
+  });
+
+  it('destroys an already-stopped warm container when Stop is requested again', () => {
+    const stopServer = methodBody(
+      sandboxSource,
+      'async stopServer',
+      'async restartServer'
+    );
+    const alreadyStoppedStart = stopServer.indexOf('if (current === "stopped")');
+    const normalStopStart = stopServer.indexOf('this.setStatusValue("stopping")');
+    assert.notEqual(alreadyStoppedStart, -1);
+    assert.notEqual(normalStopStart, -1);
+    const alreadyStoppedBranch = stopServer.slice(alreadyStoppedStart, normalStopStart);
+
+    assert.match(alreadyStoppedBranch, /await this\.destroyStoppedContainer\(\)/);
+    assert.match(alreadyStoppedBranch, /offlineRuntime\(manifest,\s*["']stopped["']\)/);
+    assert.match(alreadyStoppedBranch, /clearConnectorActivity\(\)/);
+  });
+
+  it('uses the Sandbox SDK destroy path for explicit container teardown', () => {
+    const destroyContainer = methodBody(
+      sandboxSource,
+      'private async destroyStoppedContainer',
+      'private async killProcessAndWait'
+    );
+
+    assert.match(destroyContainer, /containerState\(\)\.container\?\.running !== true/);
+    assert.match(destroyContainer, /await super\.destroy\(\)/);
+  });
+
+  it('confirms managed process termination before publishing stopped', () => {
+    const killProcesses = methodBody(
+      sandboxSource,
+      'private async killMinecraftProcesses',
+      'private async getMinecraftProcess'
+    );
+
+    assert.match(killProcesses, /MANAGED_PROCESS_IDS/);
+    assert.match(killProcesses, /killProcessAndWait/);
+    assert.match(killProcesses, /waitForProcessStopped/);
+    assert.match(killProcesses, /process\.status !== "running"/);
+    assert.match(killProcesses, /Process \$\{processId\} did not stop/);
+  });
+
   it('verifies the bridge again after Minecraft and RCON are ready', () => {
     const waitForReady = methodBody(
       sandboxSource,

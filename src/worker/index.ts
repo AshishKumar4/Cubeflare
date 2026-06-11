@@ -44,9 +44,11 @@ import type {
   CliAuthStartResponse,
   CliServerListResponse,
   HonoBindings,
+  MinecraftRuntimeStatus,
   MinecraftServerManifest,
   RuntimeLocationObservation,
   ServerCreateRequest,
+  ServerControlSnapshot,
   ServerPatchRequest,
   ServerSummary
 } from './types';
@@ -72,6 +74,12 @@ const PLUGIN_UPLOAD_LIMIT_BYTES = 128 * 1024 * 1024;
 const CONNECTOR_INVITE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CONNECTOR_INVITE_SUFFIX_LENGTH = 16;
 const CONNECTOR_INVITE_SUFFIX_GROUPS = 4;
+
+type AuthorizedConnectorSnapshot = {
+  snapshot: ServerControlSnapshot;
+  manifest: MinecraftServerManifest;
+  host: string;
+};
 
 app.use('*', async (c, next) => {
   await next();
@@ -177,18 +185,17 @@ app.post('/api/servers', requireAuth(), async (c) => {
   }
   const server = await minecraftSandboxById(c.env, serverId, manifest.location.preference);
   const summary = await server.create(manifest);
-  await c.env.USER_DO.getByName(user.userId).addServer(summary);
   c.executionCtx.waitUntil(server.startServer('server-created').catch(() => undefined));
   return c.json({ server: summary, manifest }, 201);
 });
 
 app.get('/api/servers/:serverId', requireAuth(), async (c) => {
-  const server = await authorizedServer(c.env, c.req.param('serverId'), c.get('user').userId);
+  const snapshot = await authorizedServerSnapshot(c.env, c.req.param('serverId'), c.get('user').userId);
   return c.json({
-    summary: await server.getSummary(),
-    manifest: await server.getManifest(),
-    backups: await server.listBackups(),
-    events: await server.recentEvents(40)
+    summary: snapshot.summary,
+    manifest: snapshot.manifest,
+    backups: snapshot.backups,
+    events: snapshot.events
   });
 });
 
@@ -232,15 +239,14 @@ app.post('/api/servers/:serverId/restart', requireAuth(), async (c) => {
 });
 
 app.get('/api/servers/:serverId/status', requireAuth(), async (c) => {
-  const server = await authorizedServer(c.env, c.req.param('serverId'), c.get('user').userId);
-  c.executionCtx.waitUntil(recordRequestLocation(c.req.raw, server));
-  return c.json({ runtime: await server.runtimeStatus(), summary: await server.getSummary() });
+  const snapshot = await authorizedServerSnapshot(c.env, c.req.param('serverId'), c.get('user').userId);
+  return c.json({ runtime: snapshot.runtime ?? runtimeFromSnapshot(snapshot), summary: snapshot.summary });
 });
 
 app.post('/api/servers/:serverId/connect-invite', requireAuth(), async (c) => {
   const user = c.get('user');
-  const manifest = await authorizedManifest(c.env, c.req.param('serverId'), user.userId);
-  return c.json(await createConnectorInviteForUser(c.env, c.req.url, manifest, user.userId));
+  const snapshot = await authorizedServerSnapshot(c.env, c.req.param('serverId'), user.userId);
+  return c.json(await createConnectorInviteForUser(c.env, c.req.url, snapshot.manifest, user.userId));
 });
 
 app.get('/api/servers/:serverId/diagnostics', requireAuth(), async (c) => {
@@ -287,8 +293,8 @@ app.post('/api/servers/:serverId/backups', requireAuth(), async (c) => {
 });
 
 app.get('/api/servers/:serverId/backups', requireAuth(), async (c) => {
-  const server = await authorizedServer(c.env, c.req.param('serverId'), c.get('user').userId);
-  return c.json({ backups: await server.listBackups() });
+  const snapshot = await authorizedServerSnapshot(c.env, c.req.param('serverId'), c.get('user').userId);
+  return c.json({ backups: snapshot.backups });
 });
 
 app.post('/api/servers/:serverId/backups/:backupId/restore', requireAuth(), async (c) => {
@@ -441,7 +447,8 @@ app.post('/api/servers/:serverId/plugins/upload', requireAuth(), async (c) => {
 });
 
 app.get('/api/servers/:serverId/dynmap', requireAuth(), async (c) => {
-  const manifest = await authorizedManifest(c.env, c.req.param('serverId'), c.get('user').userId);
+  const snapshot = await authorizedServerSnapshot(c.env, c.req.param('serverId'), c.get('user').userId);
+  const manifest = snapshot.manifest;
   const includePreview = c.req.query('preview') === '1' || c.req.query('preview') === 'true';
   const previewHostname = configuredPreviewHostname(c.env);
   const previewDnsReady = c.env.PREVIEW_DNS_READY === 'true' && Boolean(previewHostname);
@@ -598,6 +605,21 @@ async function authorizedServer(env: AppEnv, serverId: string, userId: string) {
   return server;
 }
 
+async function authorizedServerSnapshot(
+  env: AppEnv,
+  serverId: string,
+  userId: string
+): Promise<ServerControlSnapshot> {
+  const snapshot = await env.USER_DO.getByName(userId).getServerSnapshot(serverId.toLowerCase());
+  if (snapshot && snapshot.summary.ownerId === userId && snapshot.manifest.ownerId === userId) {
+    return snapshot;
+  }
+  // Servers created before snapshots existed have no row yet; publish one from
+  // the sandbox once so every later read stays passive.
+  const server = await authorizedServer(env, serverId, userId);
+  return server.publishControlSnapshot();
+}
+
 async function authorizedManifest(
   env: AppEnv,
   serverId: string,
@@ -607,6 +629,24 @@ async function authorizedManifest(
   const manifest = await server.getManifest();
   if (!manifest) throw new HttpError(404, 'server_not_found', 'Server not found');
   return manifest;
+}
+
+function runtimeFromSnapshot(snapshot: ServerControlSnapshot): MinecraftRuntimeStatus {
+  const { summary, manifest } = snapshot;
+  return {
+    process: summary.status === 'error' ? 'error' : summary.status === 'running' ? 'running' : 'missing',
+    containerRunning: summary.status === 'running' || summary.status === 'stopping',
+    playersOnline: summary.playersOnline,
+    activeBridgeConnections: summary.activeBridgeConnections,
+    maxPlayers: summary.maxPlayers,
+    players: [],
+    motd: manifest.motd,
+    version: manifest.version,
+    lastBackupAt: summary.lastBackupAt,
+    joinHost: summary.joinHost,
+    location: summary.runtimeLocation,
+    rconHealthy: summary.status === 'running'
+  };
 }
 
 async function startCliAuth(
@@ -753,8 +793,8 @@ async function createConnectorInviteForCli(
 ): Promise<ConnectorInviteResponse> {
   const servers = await env.USER_DO.getByName(userId).listServers();
   const summary = resolveCliServer(servers, serverRef);
-  const manifest = await authorizedManifest(env, summary.id, userId);
-  return createConnectorInviteForUser(env, requestUrl, manifest, userId);
+  const snapshot = await authorizedServerSnapshot(env, summary.id, userId);
+  return createConnectorInviteForUser(env, requestUrl, snapshot.manifest, userId);
 }
 
 async function createConnectorInviteForUser(
@@ -1499,14 +1539,14 @@ async function handleConnectorProgress(
   body: ConnectorSessionRequest
 ): Promise<ConnectorProgressResponse> {
   const secret = await connectorInviteSecret(env);
-  const { server, manifest, host } = await authorizeConnectorRequest(env, body, secret);
+  const { snapshot, manifest, host } = await authorizeConnectorSnapshot(env, body, secret);
   return {
     serverId: manifest.serverId,
     host,
-    summary: await server.getSummary(),
-    runtime: await server.runtimeSnapshot().catch(() => null),
-    lifecycle: await server.getLifecyclePhase(),
-    events: await server.recentEvents(8)
+    summary: snapshot.summary,
+    runtime: snapshot.runtime ?? runtimeFromSnapshot(snapshot),
+    lifecycle: snapshot.summary.lifecycle ?? null,
+    events: snapshot.events.slice(0, 8)
   };
 }
 
@@ -1515,15 +1555,14 @@ async function handleConnectorDiagnostics(
   body: ConnectorSessionRequest
 ): Promise<ConnectorDiagnosticsResponse> {
   const secret = await connectorInviteSecret(env);
-  const { server, manifest, host } = await authorizeConnectorRequest(env, body, secret);
-  const runtime = await server.runtimeSnapshot().catch(() => null);
+  const { snapshot, manifest, host } = await authorizeConnectorSnapshot(env, body, secret);
   return {
     serverId: manifest.serverId,
     host,
-    summary: await server.getSummary(),
-    runtime,
-    lifecycle: await server.getLifecyclePhase(),
-    events: await server.recentEvents(16)
+    summary: snapshot.summary,
+    runtime: snapshot.runtime ?? runtimeFromSnapshot(snapshot),
+    lifecycle: snapshot.summary.lifecycle ?? null,
+    events: snapshot.events.slice(0, 16)
   };
 }
 
@@ -1533,6 +1572,17 @@ async function authorizeConnectorRequest(
   secret: string,
   options: { touchInvite?: boolean } = {}
 ) {
+  const { manifest, host } = await authorizeConnectorSnapshot(env, body, secret, options);
+  const server = await minecraftSandboxById(env, manifest.serverId);
+  return { server, manifest, host };
+}
+
+async function authorizeConnectorSnapshot(
+  env: AppEnv,
+  body: ConnectorSessionRequest,
+  secret: string,
+  options: { touchInvite?: boolean } = {}
+): Promise<AuthorizedConnectorSnapshot> {
   if (!body.inviteCode || body.inviteCode.length > 128) {
     throw new HttpError(400, 'invalid_invite_code', 'Invite code is required');
   }
@@ -1553,11 +1603,21 @@ async function authorizeConnectorRequest(
   if (invite.kind !== 'primary') {
     throw new HttpError(401, 'invalid_invite_code', 'Invite code is not a server invite');
   }
-  const server = await minecraftSandboxById(env, invite.serverId);
-  const manifest = await server.getManifest();
-  if (!manifest || manifest.ownerId !== invite.ownerId) {
+  let snapshot: ServerControlSnapshot | null = await env.USER_DO.getByName(invite.ownerId).getServerSnapshot(
+    invite.serverId
+  );
+  if (!snapshot) {
+    // Backfill for servers that predate snapshots: publish one from the
+    // sandbox so later connector reads stay passive.
+    const server = await minecraftSandboxById(env, invite.serverId);
+    if ((await server.getOwnerId()) === invite.ownerId) {
+      snapshot = await server.publishControlSnapshot();
+    }
+  }
+  if (!snapshot || snapshot.manifest.ownerId !== invite.ownerId) {
     throw new HttpError(404, 'server_not_found', 'Server not found');
   }
+  const manifest = snapshot.manifest;
   const host = publicJoinHost(env, manifest);
   if (invite.host.toLowerCase() !== host.toLowerCase()) {
     throw new HttpError(401, 'invalid_invite_code', 'Invite code is for a different server host');
@@ -1565,7 +1625,7 @@ async function authorizeConnectorRequest(
   if (body.server && !connectorServerMatches(body.server, manifest, host)) {
     throw new HttpError(400, 'server_mismatch', 'Invite code does not match the requested server');
   }
-  return { server, manifest, host };
+  return { snapshot, manifest, host };
 }
 
 function connectorServerMatches(value: string, manifest: MinecraftServerManifest, host: string): boolean {

@@ -50,7 +50,9 @@ export type AuthenticatedUser = {
   sessionId: string;
 };
 
-export type JsonRecord = Record<string, unknown>;
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+export type JsonRecord = Record<string, JsonValue>;
 
 export type ServerPreset =
   | 'vanilla'
@@ -207,6 +209,21 @@ export type MinecraftRuntimeStatus = {
   rconHealthy: boolean;
 };
 
+export type ServerEventRecord = {
+  type: string;
+  detail: string;
+  createdAt: string;
+};
+
+export type ServerControlSnapshot = {
+  summary: ServerSummary;
+  manifest: MinecraftServerManifest;
+  runtime: MinecraftRuntimeStatus | null;
+  backups: BackupRecord[];
+  events: ServerEventRecord[];
+  updatedAt: string;
+};
+
 export type ServerCreateRequest = Partial<
   Pick<
     MinecraftServerManifest,
@@ -311,7 +328,7 @@ export type ConnectorDiagnosticsResponse = {
   summary: ServerSummary | null;
   runtime: MinecraftRuntimeStatus | null;
   lifecycle: ServerLifecyclePhase | null;
-  events: Array<{ type: string; detail: unknown; createdAt: string }>;
+  events: ServerEventRecord[];
 };
 
 export type ConnectorProgressResponse = {
@@ -320,7 +337,7 @@ export type ConnectorProgressResponse = {
   summary: ServerSummary | null;
   runtime: MinecraftRuntimeStatus | null;
   lifecycle: ServerLifecyclePhase | null;
-  events: Array<{ type: string; detail: unknown; createdAt: string }>;
+  events: ServerEventRecord[];
 };
 
 export type CliAuthStartResponse = {

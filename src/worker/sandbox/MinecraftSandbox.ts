@@ -9,9 +9,13 @@ import {
   planLifecycleAlarm,
   shouldRenewContainerActivity,
 } from "../minecraft/lifecycle-policy";
+import { statusFromRuntime } from "../minecraft/runtime-state";
 import { executeRcon, parseListResponse } from "../minecraft/rcon";
 import { internalBaseUrlForManifest, publicJoinHost } from "../hosts";
-import { normalizeManifestCompatibility, patchManifest } from "../minecraft/presets";
+import {
+  normalizeManifestCompatibility,
+  patchManifest,
+} from "../minecraft/presets";
 import {
   summarizeConnectorActivitySessions,
   updateConnectorActivitySessions,
@@ -26,6 +30,8 @@ import type {
   MinecraftRuntimeStatus,
   MinecraftServerManifest,
   RuntimeLocationObservation,
+  ServerControlSnapshot,
+  ServerEventRecord,
   ServerPatchRequest,
   ServerLifecyclePhase,
   ServerLifecycleStep,
@@ -37,10 +43,18 @@ const MANIFEST_PATH = `${SERVER_DIR}/.cubeflare/manifest.json`;
 const MINECRAFT_PROCESS = "minecraft-server";
 const BRIDGE_PROCESS = "minecraft-bridge";
 const DYNMAP_SYNC_PROCESS = "dynmap-sync";
+const MANAGED_PROCESS_IDS = [
+  MINECRAFT_PROCESS,
+  BRIDGE_PROCESS,
+  DYNMAP_SYNC_PROCESS,
+] as const;
 const MINECRAFT_PORT = 25565;
 const RCON_PORT = 25575;
 const BRIDGE_PORT = 25566;
 const DYNMAP_PORT = 8123;
+const PROCESS_STOP_GRACE_MS = 20_000;
+const PROCESS_KILL_WAIT_MS = 10_000;
+const PROCESS_STOP_POLL_MS = 500;
 const CONNECTOR_ACTIVITY_SESSIONS_KEY = "connectorActivitySessions";
 const LIFECYCLE_TICK_SCHEDULED_AT_KEY = "lifecycleTickScheduledAt";
 const LIFECYCLE_PHASE_KEY = "lifecyclePhase";
@@ -170,11 +184,11 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
         emptyPresence(),
       );
       this.putJson("summary", summary);
-      await this.syncUserSummary(summary).catch(() => undefined);
+      await this.syncUserSnapshot(summary);
     }
   }
 
-  create(manifest: MinecraftServerManifest): ServerSummary {
+  async create(manifest: MinecraftServerManifest): Promise<ServerSummary> {
     if (this.getManifest()) {
       throw new Error("Server already exists");
     }
@@ -193,6 +207,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       emptyPresence(),
     );
     this.putJson("summary", summary);
+    await this.syncUserSnapshot(summary);
     return summary;
   }
 
@@ -213,10 +228,6 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       activeBridgeConnections: summary.activeBridgeConnections ?? 0,
       lifecycle: this.currentLifecyclePhase() ?? summary.lifecycle,
     };
-  }
-
-  getLifecyclePhase(): ServerLifecyclePhase | null {
-    return this.currentLifecyclePhase();
   }
 
   async recordConnectorActivity(
@@ -358,14 +369,17 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     const manifest = this.requireManifest();
     const current = this.getStatusValue();
     if (current === "stopped") {
+      await this.destroyStoppedContainer();
       const summary = this.summaryFromManifest(
         manifest,
         "stopped",
         emptyPresence(),
       );
+      this.putJson(RUNTIME_CACHE_KEY, this.offlineRuntime(manifest, "stopped"));
       this.putJson("summary", summary);
-      await this.syncUserSummary(summary);
+      await this.syncUserSnapshot(summary);
       this.clearLifecycleTick();
+      this.clearConnectorActivity();
       return { summary, backup: null };
     }
 
@@ -375,26 +389,38 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       detail: "Saving the world before stopping Minecraft",
     });
     this.appendEvent("server.stopping", { reason });
+    this.clearLifecycleTick();
+    this.clearConnectorActivity();
     await this.publishSummary(manifest, "stopping", this.currentPresence());
 
     try {
-      const backup = await this.createAndStoreBackup(reason);
-      if (!backup) throw new Error("Backup was not created");
-      await this.rcon("stop").catch(() => undefined);
+      // Boot restores the latest backup, so destroying the container after a
+      // failed backup would discard everything since the previous one. A
+      // backup error must abort the stop and leave the container intact.
+      const backup = await this.createAndStoreBackup(reason, {
+        required: false,
+      });
+      await this.requestMinecraftStop();
       await this.killMinecraftProcesses();
+      await this.destroyStoppedContainer();
 
       this.setStatusValue("stopped");
       this.setLifecyclePhase("stopped", {
         reason,
         detail: "Server stopped by request",
       });
+      this.putJson(
+        RUNTIME_CACHE_KEY,
+        this.offlineRuntime(this.requireManifest(), "stopped"),
+      );
+      this.appendEvent("server.stopped", { reason, backupId: backup?.id });
       const summary = this.summaryFromManifest(
         this.requireManifest(),
         "stopped",
         emptyPresence(),
       );
       this.putJson("summary", summary);
-      await this.syncUserSummary(summary);
+      await this.syncUserSnapshot(summary);
       this.clearLifecycleTick();
       return { summary, backup };
     } catch (error) {
@@ -443,17 +469,30 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     const manifest = this.requireManifest();
     const current = this.getStatusValue();
     const runtime = this.cachedRuntime(manifest, current);
-    const nextStatus = this.statusFromRuntime(current, runtime);
+    const nextStatus = statusFromRuntime(current, runtime);
     if (nextStatus !== current) {
       await this.syncRuntimeSummary(this.requireManifest(), current, runtime);
     }
     return runtime;
   }
 
-  async runtimeSnapshot(): Promise<MinecraftRuntimeStatus> {
-    const manifest = this.getManifest();
-    if (!manifest) throw new Error("Server does not exist");
-    return this.cachedRuntime(manifest, this.getStatusValue());
+  async publishControlSnapshot(): Promise<ServerControlSnapshot> {
+    const manifest = this.requireManifest();
+    const summary =
+      this.getSummary() ??
+      this.summaryFromManifest(
+        manifest,
+        this.getStatusValue(),
+        this.currentPresence(),
+      );
+    const snapshot = this.controlSnapshot(
+      summary,
+      this.getJson<MinecraftRuntimeStatus>(RUNTIME_CACHE_KEY),
+    );
+    await this.env.USER_DO.getByName(manifest.ownerId).upsertServerSnapshot(
+      snapshot,
+    );
+    return snapshot;
   }
 
   async backup(reason = "manual-backup"): Promise<BackupRecord> {
@@ -471,7 +510,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       this.currentPresence(),
     );
     this.putJson("summary", summary);
-    await this.syncUserSummary(summary);
+    await this.syncUserSnapshot(summary);
     return backup;
   }
 
@@ -517,12 +556,12 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
         reason: "manual-restore",
         detail: "Backup restored and Minecraft is accepting connections",
       });
+      this.appendEvent("backup.restored", { backupId });
       const summary = await this.syncRuntimeSummary(
         this.requireManifest(),
         "running",
         runtime,
       );
-      this.appendEvent("backup.restored", { backupId });
       await this.scheduleLifecycleTick();
       return { summary, runtime };
     } catch (error) {
@@ -583,9 +622,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     return row ? (JSON.parse(row.json) as BackupRecord) : null;
   }
 
-  recentEvents(
-    limit = 50,
-  ): Array<{ type: string; detail: unknown; createdAt: string }> {
+  recentEvents(limit = 50): ServerEventRecord[] {
     return this.ctx.storage.sql
       .exec<EventRow>(
         "SELECT id, type, detail_json, created_at FROM events ORDER BY id DESC LIMIT ?",
@@ -594,7 +631,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       .toArray()
       .map((row) => ({
         type: row.type,
-        detail: JSON.parse(row.detail_json),
+        detail: row.detail_json,
         createdAt: row.created_at,
       }));
   }
@@ -661,6 +698,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       reason: "bridge-wake",
       detail: "Bridge is open for Minecraft traffic",
     });
+    await this.syncUserSnapshot();
     return {
       url: publicBaseHost
         ? `wss://${publicBaseHost}/api/connect/bridge/${manifest.serverId}`
@@ -769,9 +807,6 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     });
 
     if (!decision.inspectRuntime) {
-      if (manifest && (current === "running" || current === "starting")) {
-        await this.scheduleLifecycleTick();
-      }
       return;
     }
 
@@ -788,6 +823,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       this.appendEvent("alarm.error", {
         message: error instanceof Error ? error.message : String(error),
       });
+      await this.syncUserSnapshot();
     } finally {
       await this.scheduleLifecycleTick();
     }
@@ -1111,6 +1147,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
           reason,
           detail: "Backup complete; Minecraft is accepting connections",
         });
+        await this.syncUserSnapshot();
       }
     }
   }
@@ -1136,12 +1173,14 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
 
         await this.insertBackup(backup);
         this.appendEvent("backup.created", { backupId: backup.id, reason });
+        await this.syncUserSnapshot();
         return backup;
       } catch (error) {
         this.appendEvent("backup.failed", {
           reason,
           message: error instanceof Error ? error.message : String(error),
         });
+        await this.syncUserSnapshot();
         throw error;
       }
     });
@@ -1214,16 +1253,45 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       : undefined;
   }
 
+  private async requestMinecraftStop(): Promise<void> {
+    const process = await this.getMinecraftProcess();
+    if (process?.status !== "running") return;
+    await this.rcon("stop").catch(() => undefined);
+    await this.waitForProcessStopped(
+      MINECRAFT_PROCESS,
+      PROCESS_STOP_GRACE_MS,
+    ).catch(() => undefined);
+  }
+
   private async killMinecraftProcesses(): Promise<void> {
-    await this.getProcess(MINECRAFT_PROCESS)
-      .then((process) => process?.kill())
-      .catch(() => undefined);
-    await this.getProcess(BRIDGE_PROCESS)
-      .then((process) => process?.kill())
-      .catch(() => undefined);
-    await this.getProcess(DYNMAP_SYNC_PROCESS)
-      .then((process) => process?.kill())
-      .catch(() => undefined);
+    for (const processId of MANAGED_PROCESS_IDS) {
+      await this.killProcessAndWait(processId);
+    }
+  }
+
+  private async destroyStoppedContainer(): Promise<void> {
+    if (this.containerState().container?.running !== true) return;
+    await super.destroy();
+  }
+
+  private async killProcessAndWait(processId: string): Promise<void> {
+    const process = await this.getProcess(processId).catch(() => null);
+    if (process?.status !== "running") return;
+    await process.kill().catch(() => undefined);
+    await this.waitForProcessStopped(processId, PROCESS_KILL_WAIT_MS);
+  }
+
+  private async waitForProcessStopped(
+    processId: string,
+    timeoutMs: number,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      const process = await this.getProcess(processId).catch(() => null);
+      if (!process || process.status !== "running") return;
+      await delay(Math.min(PROCESS_STOP_POLL_MS, deadline - Date.now()));
+    }
+    throw new Error(`Process ${processId} did not stop within ${timeoutMs}ms`);
   }
 
   private async getMinecraftProcess(): Promise<Process | null> {
@@ -1299,6 +1367,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     const started = Date.now();
     const label = lifecyclePhaseLabel(key);
     this.setLifecyclePhase(key, { ...options, label });
+    await this.syncUserSnapshot();
     try {
       const result = await action();
       this.recordLifecycleStep({
@@ -1311,6 +1380,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
         reason: options.reason,
         backupId: options.backupId,
       });
+      await this.syncUserSnapshot();
       return result;
     } catch (error) {
       this.recordLifecycleStep({
@@ -1324,6 +1394,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
         backupId: options.backupId,
         message: error instanceof Error ? error.message : String(error),
       });
+      await this.syncUserSnapshot();
       throw error;
     }
   }
@@ -1405,12 +1476,33 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
   ): Promise<ServerSummary> {
     const summary = this.summaryFromManifest(manifest, status, presence);
     this.putJson("summary", summary);
-    await this.syncUserSummary(summary);
+    await this.syncUserSnapshot(summary);
     return summary;
   }
 
-  private async syncUserSummary(summary: ServerSummary): Promise<void> {
-    await this.env.USER_DO.getByName(summary.ownerId).updateServer(summary);
+  private async syncUserSnapshot(
+    summary = this.getSummary(),
+    runtime = this.getJson<MinecraftRuntimeStatus>(RUNTIME_CACHE_KEY),
+  ): Promise<void> {
+    const manifest = this.getManifest();
+    if (!manifest || !summary) return;
+    await this.env.USER_DO.getByName(manifest.ownerId).upsertServerSnapshot(
+      this.controlSnapshot(summary, runtime),
+    );
+  }
+
+  private controlSnapshot(
+    summary: ServerSummary,
+    runtime: MinecraftRuntimeStatus | null,
+  ): ServerControlSnapshot {
+    return {
+      summary,
+      manifest: this.requireManifest(),
+      runtime,
+      backups: this.listBackups(),
+      events: this.recentEvents(40),
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   private async syncRuntimeSummary(
@@ -1419,7 +1511,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     runtime: MinecraftRuntimeStatus,
   ): Promise<ServerSummary> {
     this.putJson(RUNTIME_CACHE_KEY, runtime);
-    const status = this.statusFromRuntime(current, runtime);
+    const status = statusFromRuntime(current, runtime);
     this.setStatusValue(status);
     const summary = this.summaryFromManifest(
       manifest,
@@ -1427,7 +1519,7 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       presenceFromRuntime(runtime),
     );
     this.putJson("summary", summary);
-    await this.syncUserSummary(summary);
+    await this.syncUserSnapshot(summary, runtime);
     return summary;
   }
 
@@ -1446,10 +1538,10 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
       this.currentPresence(),
     );
     this.putJson("summary", summary);
-    await this.syncUserSummary(summary);
     this.appendEvent(eventType, {
       message: error instanceof Error ? error.message : String(error),
     });
+    await this.syncUserSnapshot(summary);
   }
 
   private async scheduleLifecycleTick(): Promise<void> {
@@ -1673,34 +1765,6 @@ export class MinecraftSandbox extends BaseSandbox<AppEnv> {
     };
   }
 
-  private statusFromRuntime(
-    current: ServerSummary["status"],
-    runtime: MinecraftRuntimeStatus,
-  ): ServerSummary["status"] {
-    if (current === "deleting") return "deleting";
-    if (runtime.process === "running" && runtime.rconHealthy) return "running";
-    if (
-      !runtime.containerRunning &&
-      (current === "running" ||
-        current === "starting" ||
-        current === "stopping")
-    ) {
-      return "stopped";
-    }
-    if (current === "starting" && runtime.process !== "exited")
-      return "starting";
-    if (current === "stopping")
-      return runtime.process === "running" ? "stopping" : "stopped";
-    if (
-      (current === "running" || current === "starting") &&
-      runtime.process === "exited"
-    )
-      return "error";
-    if (current === "running" && runtime.process === "missing")
-      return "stopped";
-    return current;
-  }
-
   private requireManifest(): MinecraftServerManifest {
     const manifest = this.getManifest();
     if (!manifest) throw new Error("Server does not exist");
@@ -1897,4 +1961,8 @@ function dynmapInitialRenderSignature(
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }

@@ -12,7 +12,9 @@ describe('connector progress contract', () => {
 
     const handler = source.slice(handlerStart, handlerEnd);
     assert.match(source, /app\.post\('\/api\/connect\/progress'/);
-    assert.match(handler, /getLifecyclePhase\(\)/);
+    assert.match(handler, /authorizeConnectorSnapshot/);
+    assert.match(handler, /snapshot\.summary\.lifecycle/);
+    assert.match(handler, /snapshot\.events\.slice\(0,\s*8\)/);
     assert.doesNotMatch(handler, /processLogSnapshot|getProcessLogs|readyMinecraftSandbox|startServer/);
   });
 

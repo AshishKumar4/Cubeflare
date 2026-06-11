@@ -111,7 +111,8 @@ describe('connector auth boundary', () => {
     assert.notEqual(authorizeStart, -1);
 
     const diagnostics = worker.slice(diagnosticsStart, authorizeStart);
-    assert.match(diagnostics, /recentEvents/);
+    assert.match(diagnostics, /authorizeConnectorSnapshot/);
+    assert.match(diagnostics, /snapshot\.events\.slice\(0,\s*16\)/);
     assert.doesNotMatch(diagnostics, /processLogSnapshot|getProcessLogs|logs:/);
   });
 });

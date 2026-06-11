@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { AppEnv, AuthenticatedUser, ServerSummary } from '../types';
+import type { AppEnv, AuthenticatedUser, ServerControlSnapshot, ServerSummary } from '../types';
 
 export type StoredProfile = {
   id: string;
@@ -46,6 +46,12 @@ type ServerRow = {
   updated_at: string;
 };
 
+type ServerSnapshotRow = {
+  server_id: string;
+  snapshot_json: string;
+  updated_at: string;
+};
+
 export class UserDO extends DurableObject<AppEnv> {
   constructor(ctx: DurableObjectState, env: AppEnv) {
     super(ctx, env);
@@ -83,6 +89,12 @@ export class UserDO extends DurableObject<AppEnv> {
           name TEXT NOT NULL,
           summary_json TEXT NOT NULL,
           created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS server_snapshots (
+          server_id TEXT PRIMARY KEY,
+          snapshot_json TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
       `);
@@ -282,12 +294,35 @@ export class UserDO extends DurableObject<AppEnv> {
     );
   }
 
-  updateServer(summary: ServerSummary): void {
-    this.addServer(summary);
+  upsertServerSnapshot(snapshot: ServerControlSnapshot): void {
+    this.addServer(snapshot.summary);
+    this.ctx.storage.sql.exec(
+      `
+        INSERT INTO server_snapshots (server_id, snapshot_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(server_id) DO UPDATE SET
+          snapshot_json = excluded.snapshot_json,
+          updated_at = excluded.updated_at
+      `,
+      snapshot.summary.id,
+      JSON.stringify(snapshot),
+      snapshot.updatedAt
+    );
+  }
+
+  getServerSnapshot(serverId: string): ServerControlSnapshot | null {
+    const row = this.ctx.storage.sql
+      .exec<ServerSnapshotRow>(
+        'SELECT server_id, snapshot_json, updated_at FROM server_snapshots WHERE server_id = ?',
+        serverId
+      )
+      .toArray()[0];
+    return row ? (JSON.parse(row.snapshot_json) as ServerControlSnapshot) : null;
   }
 
   removeServer(serverId: string): void {
     this.ctx.storage.sql.exec('DELETE FROM servers WHERE server_id = ?', serverId);
+    this.ctx.storage.sql.exec('DELETE FROM server_snapshots WHERE server_id = ?', serverId);
   }
 
   listServers(): ServerSummary[] {
