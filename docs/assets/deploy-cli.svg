@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="218" viewBox="0 0 840 218" role="img" aria-label="Terminal: install the Cubeflare CLI and run cubeflare deploy">
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f38020" />
+      <stop offset=".35" stop-color="#e3b84d" />
+      <stop offset=".7" stop-color="#4fcb76" />
+      <stop offset="1" stop-color="#5cc8f2" />
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5cc8f2" stop-opacity=".12" />
+      <stop offset="1" stop-color="#5cc8f2" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="837" height="215" rx="14" fill="#0d1117" stroke="url(#frame)" stroke-width="1.6" />
+  <rect x="1.5" y="1.5" width="837" height="64" rx="14" fill="url(#sheen)" />
+  <circle cx="26" cy="23" r="5.5" fill="#ef6b61" />
+  <circle cx="46" cy="23" r="5.5" fill="#e3b84d" />
+  <circle cx="66" cy="23" r="5.5" fill="#4fcb76" />
+  <text x="420" y="27.5" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#8b949e">cubeflare · one-command deploy</text>
+  <line x1="1.5" y1="44" x2="838.5" y2="44" stroke="#21262d" stroke-width="1" />
+  <g font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13">
+    <text x="24" y="78"><tspan fill="#4fcb76">$ </tspan><tspan fill="#e6edf3">curl</tspan><tspan fill="#8b949e"> -fsSL </tspan><tspan fill="#5cc8f2">https://raw.githubusercontent.com/AshishKumar4/Cubeflare/main/public/install.sh</tspan><tspan fill="#8b949e"> | </tspan><tspan fill="#e6edf3">sh</tspan></text>
+    <text x="24" y="106"><tspan fill="#4fcb76">$ </tspan><tspan fill="#f38020" font-weight="700">cubeflare</tspan><tspan fill="#e6edf3" font-weight="700"> deploy</tspan></text>
+    <text x="24" y="138"><tspan fill="#4fcb76">✔</tspan><tspan fill="#9ad9a8"> R2 buckets · Worker secrets · container image · Worker deployed</tspan></text>
+    <text x="24" y="164"><tspan fill="#4fcb76">✔</tspan><tspan fill="#9ad9a8"> health check passed — your Minecraft fleet is live on workers.dev</tspan></text>
+    <text x="24" y="194"><tspan fill="#4fcb76">$</tspan></text>
+  </g>
+  <rect x="42" y="182" width="8.5" height="15" fill="#4fcb76">
+    <animate attributeName="opacity" values="1;0" dur="1.1s" calcMode="discrete" repeatCount="indefinite" />
+  </rect>
+</svg>

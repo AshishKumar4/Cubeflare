@@ -5,9 +5,14 @@
 </p>
 
 <p align="center">
-  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/AshishKumar4/Cubeflare">
-    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" />
+  <a href="docs/deployment.md">
+    <img src="docs/assets/deploy-cli.svg" width="830" alt="Terminal: curl -fsSL https://raw.githubusercontent.com/AshishKumar4/Cubeflare/main/public/install.sh | sh, then cubeflare deploy" />
   </a>
+</p>
+
+<p align="center">
+  One command in your terminal. The deploy wizard signs into Cloudflare, creates every
+  resource, builds the container image, deploys the Worker, and smoke-tests your fleet.
 </p>
 
 <p align="center">
@@ -64,8 +69,9 @@ secrets, builds the Worker and Minecraft container image, deploys with an
 immediate container rollout, and smoke-tests the deployed health endpoint. A
 workers.dev hostname works by default; a custom domain is optional.
 
-Use the Deploy to Cloudflare button for a dashboard-first flow, then finish with
-`cubeflare deploy` or the account-specific steps in
+Prefer a dashboard-first flow? Start from
+[Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/AshishKumar4/Cubeflare),
+then finish with `cubeflare deploy` or the account-specific steps in
 [docs/deployment.md](docs/deployment.md).
 
 Manual deploy:

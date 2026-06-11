@@ -9,6 +9,7 @@ describe('release hygiene contract', () => {
       'LICENSE',
       'SECURITY.md',
       'docs/deployment.md',
+      'docs/assets/deploy-cli.svg',
       'docs/screenshots/landing.png',
       'docs/screenshots/dashboard.png'
     ]) {
@@ -17,7 +18,8 @@ describe('release hygiene contract', () => {
 
     const readme = readFileSync('README.md', 'utf8');
     assert.match(readme, /Cubeflare/);
-    assert.match(readme, /deploy\.workers\.cloudflare\.com\/button/);
+    assert.match(readme, /docs\/assets\/deploy-cli\.svg/);
+    assert.match(readme, /cubeflare deploy/);
     assert.match(readme, /https:\/\/deploy\.workers\.cloudflare\.com\/\?url=https:\/\/github\.com\/AshishKumar4\/Cubeflare/);
     assert.match(readme, /docs\/screenshots\/landing\.png/);
     assert.match(readme, /docs\/screenshots\/dashboard\.png/);
